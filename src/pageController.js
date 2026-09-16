@@ -22,8 +22,15 @@ import {
 } from './cfdVisualization.js';
 import { LARGE_MODEL_CONFIG } from './config.js';
 import { initializeDocView, openDoc, closeDoc } from './docView.js';
+import {
+    initializeCaseStudies,
+    setCaseStudiesVisible,
+    setActiveStudy,
+} from './caseStudies.js';
 
 const ACTIVE_PAGE_KEY = 'pedmodel.visualization.activePage';
+/** Persisted design-proposal selection. */
+const ACTIVE_STUDY_KEY = 'pedmodel.visualization.activeStudy';
 /** When true the camera was moved by the user and must not be auto-overridden. */
 let cameraTouchedByUser = false;
 
@@ -434,11 +441,13 @@ function applyPanelSections(page) {
         panel.classList.toggle('panel-light', docPage);
     }
     document.body.classList.toggle('doc-page-active', docPage);
+    document.body.classList.toggle('cases-page-active', !!page.cases);
 
     // Global legends toggle scene layers and vehicles, none of which exist on a
-    // reading page — there the panel is purely a table of contents.
+    // reading page or the proposal picker — on those the panel carries only
+    // page-specific controls.
     const globalBlock = document.getElementById('globalLegendsBlock');
-    if (globalBlock) globalBlock.style.display = docPage ? 'none' : '';
+    if (globalBlock) globalBlock.style.display = docPage || page.cases ? 'none' : '';
 
     const sections = document.querySelectorAll('#paramPanel [data-page-section]');
     sections.forEach((el) => {
@@ -596,6 +605,8 @@ export async function gotoPage(pageId, options = {}) {
         // map and clicked the nav button again to return.
         if (page.doc) {
             await openDoc({ source: page.doc.source, title: page.doc.title || page.title });
+        } else if (page.cases) {
+            setCaseStudiesVisible(true);
         }
         return;
     }
@@ -613,17 +624,31 @@ export async function gotoPage(pageId, options = {}) {
     }
 
     applyPageCamera(page, { immediate: options.immediateCamera });
+
+    // Switch the viewport overlay *before* loading layers. `applyPageLayers`
+    // awaits the heavy models (the sunlight GLB in particular), and hiding the
+    // picker only afterwards left it sitting over the newly opened page for
+    // several seconds.
+    if (page.doc) {
+        setCaseStudiesVisible(false);
+    } else if (page.cases) {
+        closeDoc();
+        setCaseStudiesVisible(true);
+    } else {
+        closeDoc();
+        setCaseStudiesVisible(false);
+    }
+
     await applyPageLayers(page);
     // Layers write their ramps asynchronously (dataset load), so refresh the
     // mirrored legends now and again once the data has settled.
     syncPanelLegends();
     scheduleLegendSync();
 
-    // Reading pages take over the viewport instead of the globe.
+    // Opening the document itself is still awaited, so callers know when the
+    // reading page is ready.
     if (page.doc) {
         await openDoc({ source: page.doc.source, title: page.doc.title || page.title });
-    } else {
-        closeDoc();
     }
 }
 
@@ -673,6 +698,33 @@ export async function initializePages(navEl) {
     await hydratePanelLegends();
 
     initializeDocView();
+
+    // Restore the last chosen design proposal before the first page applies its
+    // layers, so the initial render already reflects the saved study.
+    let startStudy = null;
+    try {
+        startStudy = sessionStorage.getItem(ACTIVE_STUDY_KEY);
+    } catch (_) {
+        /* ignore */
+    }
+    initializeCaseStudies({
+        onStudyChange: (study) => {
+            // Pages read the effective study when they load data; re-apply the
+            // active page so a change is reflected without a manual reload.
+            try {
+                sessionStorage.setItem(ACTIVE_STUDY_KEY, study.requested);
+            } catch (_) {
+                /* ignore */
+            }
+            if (activePage && !activePage.doc && !activePage.cases) {
+                applyPageLayers(activePage).then(scheduleLegendSync).catch(() => {
+                    /* ignore */
+                });
+            }
+        },
+    });
+    if (startStudy) setActiveStudy(startStudy);
+
     const viewer = getViewer();
     viewer.camera.moveStart.addEventListener(() => {
         cameraTouchedByUser = true;

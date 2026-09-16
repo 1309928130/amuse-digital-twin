@@ -37,6 +37,76 @@ export const PAGE_IDS = [
 ];
 
 /**
+ * @typedef {Object} ProposalDef
+ * @property {string} id       Stable key, also the intended data folder name
+ * @property {string} label    Name shown on the card and as the active study
+ * @property {string} thumbnail Path to the preview image
+ * @property {string} note     One-line description shown under the name
+ * @property {boolean} hasData Whether assessment data exists for this proposal
+ */
+
+/**
+ * Design proposals shown on the Case studies page.
+ *
+ * Selecting one makes it the active study for every assessment page. Right now
+ * only Proposal 1 has simulation data behind it; the others are here so the
+ * comparison is legible, and are marked as having no data yet rather than
+ * silently rendering Proposal 1's results under another name.
+ *
+ * When the remaining assessments are run, the data for each proposal belongs
+ * under `simulation_data/<proposal id>/`, and `resolveStudyPath()` below is the
+ * single place that decides where a page reads from.
+ *
+ * @type {ProposalDef[]}
+ */
+export const PROPOSALS = [
+    {
+        id: 'proposal-1',
+        label: 'Proposal 1',
+        thumbnail: './cases/proposal1.png',
+        note: 'Current design. All assessment pages show its results.',
+        hasData: true,
+    },
+    {
+        id: 'proposal-2',
+        label: 'Proposal 2',
+        thumbnail: './cases/proposal2.png',
+        note: 'Alternative layout. Assessment data not yet available.',
+        hasData: false,
+    },
+    {
+        id: 'proposal-3',
+        label: 'Proposal 3',
+        thumbnail: './cases/proposal3.png',
+        note: 'Alternative layout. Assessment data not yet available.',
+        hasData: false,
+    },
+];
+
+/** The proposal that currently has data, and the default active study. */
+export const DEFAULT_PROPOSAL_ID = 'proposal-1';
+
+/**
+ * Resolve the active study.
+ *
+ * Until other proposals have data, any selection falls back to the default so
+ * pages keep rendering real results. This returns both the requested and the
+ * effective id, so the UI can be honest about the substitution instead of
+ * pretending the selection took effect.
+ *
+ * @param {string} requestedId
+ * @returns {{ requested: string, effective: string, substituted: boolean }}
+ */
+export function resolveStudy(requestedId) {
+    const requested = PROPOSALS.find((p) => p.id === requestedId) ? requestedId : DEFAULT_PROPOSAL_ID;
+    const proposal = PROPOSALS.find((p) => p.id === requested);
+    if (proposal && proposal.hasData) {
+        return { requested, effective: requested, substituted: false };
+    }
+    return { requested, effective: DEFAULT_PROPOSAL_ID, substituted: true };
+}
+
+/**
  * @typedef {Object} PageDef
  * @property {string} id
  * @property {string} label       Navigation button label
@@ -46,6 +116,7 @@ export const PAGE_IDS = [
  * @property {CameraOffset} [cameraOffset] Screen-space nudge applied on top of `camera`
  * @property {boolean} [keepCamera] Leave the camera exactly where it is (no transition)
  * @property {DocPage} [doc]      Render a document instead of the 3D scene
+ * @property {boolean} [cases]    Show the proposal picker instead of the 3D scene
  * @property {Object} layers      Layer toggles applied on page enter
  * @property {'hover'|'click'} linkTooltip
  * @property {string[]} sections  Parameter-panel sections to show
@@ -270,9 +341,9 @@ register({
     layers: { networkFlow: false, pedDemand: false, urbanHeat: false, sunlight: false, wind: false },
     linkTooltip: 'click',
     sections: ['cases-list'],
-    placeholder:
-        'Three proposal studies will be demonstrated here. Each study will reuse the assessment pages ' +
-        'with its own prepared datasets. Add proposals as <code>cases/&lt;study-id&gt;/</code> data folders.',
+    // A choice between studies rather than a place: the proposal picker takes
+    // over the viewport, the same way a document page does.
+    cases: true,
 });
 
 register({

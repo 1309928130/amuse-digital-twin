@@ -715,6 +715,160 @@
             right: calc(var(--right-panel-width) + 8px) !important;
         }
 
+        /* ============================================================
+           Case studies: proposal picker
+           ============================================================
+           The proposals are the *content* of this page rather than a
+           decoration on top of the globe, so they get the full viewport.
+           Same inset as #docView: clear of the nav bar and the right panel,
+           both of which stay usable behind the picker. */
+        #caseStudies {
+            position: absolute;
+            inset: var(--nav-height) var(--right-panel-width) 0 0;
+            z-index: 900;
+            display: flex;
+            flex-direction: column;
+            background: #14161a;
+            color: #e8eaed;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            padding: 22px 26px 26px;
+            overflow-y: auto;
+        }
+        #caseStudies[hidden] {
+            display: none;
+        }
+
+        .cases-head {
+            flex: 0 0 auto;
+            margin-bottom: 16px;
+        }
+        .cases-head h2 {
+            margin: 0 0 6px;
+            font-size: 18px;
+            font-weight: 600;
+            letter-spacing: 0.2px;
+        }
+        .cases-head p {
+            margin: 0;
+            font-size: 12.5px;
+            line-height: 1.5;
+            color: #a9b0ba;
+            max-width: 760px;
+        }
+
+        .cases-grid {
+            flex: 1 1 auto;
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 14px;
+            align-content: start;
+        }
+
+        /* Each proposal is a button so it is keyboard reachable and
+           announced as interactive, rather than a clickable div. */
+        .case-card {
+            display: flex;
+            flex-direction: column;
+            padding: 0;
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            border-radius: 8px;
+            background: #1c1f24;
+            color: inherit;
+            font: inherit;
+            text-align: left;
+            cursor: pointer;
+            overflow: hidden;
+            transition: border-color 0.16s ease, transform 0.16s ease, box-shadow 0.16s ease;
+        }
+        .case-card:hover {
+            border-color: rgba(143, 199, 255, 0.6);
+            transform: translateY(-2px);
+        }
+        .case-card:focus-visible {
+            outline: 2px solid #8fc7ff;
+            outline-offset: 2px;
+        }
+        .case-card[aria-pressed='true'] {
+            border-color: #8fc7ff;
+            box-shadow: 0 0 0 1px #8fc7ff inset, 0 6px 22px rgba(0, 0, 0, 0.45);
+        }
+
+        .case-thumb {
+            position: relative;
+            aspect-ratio: 16 / 10;
+            background: #0f1114;
+            overflow: hidden;
+        }
+        .case-thumb img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+
+        /* Badge marking the study that actually has data behind it. */
+        .case-badge {
+            position: absolute;
+            top: 8px;
+            left: 8px;
+            padding: 3px 7px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 0.3px;
+            text-transform: uppercase;
+            background: rgba(143, 199, 255, 0.92);
+            color: #10131a;
+        }
+        .case-badge.is-empty {
+            background: rgba(255, 255, 255, 0.16);
+            color: #cfd4db;
+        }
+
+        .case-meta {
+            padding: 10px 12px 12px;
+        }
+        .case-name {
+            font-size: 13.5px;
+            font-weight: 600;
+            margin-bottom: 3px;
+        }
+        .case-note {
+            font-size: 11.5px;
+            line-height: 1.45;
+            color: #a9b0ba;
+        }
+
+        .cases-foot {
+            flex: 0 0 auto;
+            margin-top: 16px;
+            padding-top: 14px;
+            border-top: 1px solid rgba(255, 255, 255, 0.12);
+            font-size: 12px;
+            line-height: 1.6;
+            color: #a9b0ba;
+            max-width: 860px;
+        }
+        .cases-foot code {
+            background: rgba(255, 255, 255, 0.09);
+            padding: 1px 5px;
+            border-radius: 3px;
+            font-size: 11.5px;
+        }
+
+        /* Active study echoed in the right panel on the case studies page. */
+        #paramPanel .case-active-name {
+            font-size: 13px;
+            font-weight: 600;
+            color: #8fc7ff;
+        }
+        #paramPanel .case-active-name[data-substituted='true']::after {
+            content: ' (showing Proposal 1)';
+            font-weight: 400;
+            font-size: 11px;
+            color: #a9b0ba;
+        }
+
     </style>
 </head>
 <body>
@@ -740,6 +894,35 @@
         <div class="doc-view-body" id="docViewBody">
             <div class="doc-view-loading">Loading…</div>
         </div>
+    </section>
+
+    <!--
+        ================= Case studies: proposal picker ===================
+        The design proposals are this page's content, so they take over the
+        viewport like the document view does. Selecting a card sets the active
+        study; only Proposal 1 currently has assessment data behind it, which
+        the badges and the footer say plainly rather than implying the other
+        two are wired up.
+    -->
+    <section id="caseStudies" aria-label="Case studies" hidden>
+        <!--
+            Selection state, read by pageController when a page loads its layers.
+            data-effective is the study actually being shown, which falls back to
+            the default until the other proposals have data.
+        -->
+        <div id="caseStudyState" hidden></div>
+
+        <div class="cases-head">
+            <h2>Design proposals</h2>
+            <p>
+                Three proposals are assessed on the same street-level grid. Pick one to make it
+                the active study for every assessment page above.
+            </p>
+        </div>
+
+        <div class="cases-grid" id="casesGrid" role="group" aria-label="Select a design proposal"></div>
+
+        <div class="cases-foot" id="casesFoot"></div>
     </section>
 
     <!-- ================= Right parameter panel =================== -->
@@ -920,22 +1103,16 @@
 
         <!-- Section: case studies -->
         <div class="param-section" data-section-id="cases-list">
-            <div class="param-section-title">Proposal studies</div>
-            <label class="param-row">
-                <input type="radio" name="caseStudy" value="proposal-1" checked>
-                <span>Proposal 1 — <em>to be added</em></span>
-            </label>
-            <label class="param-row">
-                <input type="radio" name="caseStudy" value="proposal-2">
-                <span>Proposal 2 — <em>to be added</em></span>
-            </label>
-            <label class="param-row">
-                <input type="radio" name="caseStudy" value="proposal-3">
-                <span>Proposal 3 — <em>to be added</em></span>
-            </label>
+            <div class="param-section-title">Active study</div>
+            <div class="param-row">
+                <span class="case-active-name" id="caseStudyActive">Proposal 1</span>
+            </div>
             <div class="param-help">
-                Each study will carry its own prepared assessment datasets; the pages above
-                then read the selected study.
+                Choose a proposal on the cards in the main view. Every assessment page then
+                reads that study's datasets.
+                <br><br>
+                Only Proposal 1 has results so far; the other two are placeholders until their
+                assessments are run.
             </div>
         </div>
 

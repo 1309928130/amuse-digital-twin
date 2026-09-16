@@ -35,7 +35,7 @@ const OUT = path.join(APP_ROOT, 'firebase-deploy');
 const DRY_RUN = process.argv.includes('--dry-run');
 
 /** Directories copied wholesale into the bundle. */
-const COPY_DIRS = ['src', 'framework', 'simulation_data', 'models', 'data'];
+const COPY_DIRS = ['src', 'framework', 'simulation_data', 'models', 'data', 'cases'];
 
 /**
  * Directories excluded from the bundle even though they sit inside a copy root.

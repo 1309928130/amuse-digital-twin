@@ -1,6 +1,6 @@
 # AMUSE Digital Twin — Zuidas visualization
 
-**Live viewer: [digital-twin-zuidas.web.app](https://digital-twin-zuidas.web.app/)**
+**Live viewer: [multisensory-digital-twin.web.app](https://multisensory-digital-twin.web.app/)**
 
 A federated 3D digital twin of the Zuidas area in Amsterdam, built on Cesium. It
 brings several environmental simulations into one viewer so they can be read

@@ -1,43 +1,23 @@
-# Dependencies
 node_modules/
-package-lock.json.bak
-
-# Build output — regenerate with the firebase-deploy step, never commit
-firebase-deploy/
-dist/
-build/
-
-# Downloaded data. These are large (multi-GB) and fully regenerable:
-#   npm run download-static    -> data/static-gtfs/  (GTFS feeds, ~3.3 GB)
-#   npm run download-osm       -> data/osm/          (OSM buildings)
-#   npm run download-3dbag     -> 3DBAG tiles
-data/static-gtfs/
-data/cache/
-data_cache/
-
-# Large 3D models. The 237–268 MB legacy Zuidas GLBs exceed GitHub's 100 MB
-# per-file limit and are not loaded by default (see LARGE_MODEL_CONFIG in
-# src/config.js, which pins modelPaths to the small export_for_visualization.glb).
-# Place them in models/ locally if you need them.
-models/*.glb
-!models/export_for_visualization.glb
-!models/building_block1.glb
-!models/zuidasModelFromCADDMapper.glb
-
-# Scratch / working files
+.DS_Store
 *.log
-*.swp
-*.swo
-*~
-__pycache__/
-*.pyc
 .env
 .idea/
 .vscode/
-.DS_Store
+dist/
+build/
+*.swp
+*.swo
+*~
 
-# Local dev screenshots used while tuning the UI
+# Firebase Hosting build output — regenerate with `npm run build-deploy`.
+# Everything in it is derived, so it must not be committed.
+firebase-deploy/
+
+# Downloaded data — multi-GB and regenerable (see README).
+data/static-gtfs/
+data_cache/
+
+# Local UI-tuning screenshots
 _*.png
 
-# Firebase
-.firebase/

@@ -15,7 +15,9 @@
     "extract-gtfs": "node extract-gtfs-schedule.js",
     "download-3dbag": "node download-3dbag-tiles.js",
     "sync-docs": "node tools/sync-framework-doc.mjs",
-    "check-docs": "node tools/sync-framework-doc.mjs --check"
+    "check-docs": "node tools/sync-framework-doc.mjs --check",
+    "build-deploy": "node tools/build-firebase-deploy.mjs",
+    "deploy": "node tools/sync-framework-doc.mjs && node tools/build-firebase-deploy.mjs && npx firebase deploy --only hosting"
   },
   "keywords": [
     "cesium",

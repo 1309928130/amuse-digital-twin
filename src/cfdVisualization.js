@@ -290,31 +290,33 @@ const GROUND_POINT_LIFT = 0.5;
 /**
  * Distance at which a point stops drawing through geometry, in metres.
  *
- * Effectively unlimited, and that is deliberate. The probes sit at street level
- * between dense blocks, so with real depth testing the massing in front of them
- * hides most of the field from any oblique view, and the layer looks broken.
- * Letting the points ignore the depth buffer is what makes the field readable,
- * and it is the setting that was verified to look right on the Zuidas model:
- * buildings are not covered by dots, because the points are drawn *through* the
- * scene rather than painted over the massing.
+ * This is the setting that governs whether the dots cover the buildings.
+ * `disableDepthTestDistance` is a **screen-space** heuristic: while a point is
+ * nearer the camera than this value it ignores the depth buffer and draws over
+ * everything; beyond it, normal depth testing applies and the massing occludes
+ * it.
  *
- * A finite number rather than `Number.POSITIVE_INFINITY`: this Cesium build
- * coerces Infinity to null on PointPrimitive, which silently re-enables depth
- * testing. 1e9 m is far beyond any viewing distance in this scene, so it is
- * Infinity in effect.
+ * The site is framed from roughly 550-700 m, so the value has to stay below
+ * that or every point is inside the range at the default view and the field
+ * paints over the buildings — which is exactly what 1e9 did. It must still be
+ * large enough that the street-level field reads through the massing when you
+ * zoom in to inspect it.
+ *
+ * 400 m sits between the two: past the site view the buildings occlude the
+ * field, and close in the points still read through the geometry.
+ *
+ * Note when testing changes: compare values against the *actual* probe
+ * distances at the framing you care about. Comparing 0 against 400 at a 550 m
+ * viewing distance shows no difference, because both are under the points'
+ * distance — which makes the setting look inert when it is not.
  */
-const DEPTH_TEST_DISABLE_RANGE = 1e9;
+const DEPTH_TEST_DISABLE_RANGE = 400;
 
 /**
  * Default point size and probe budget for the pollution field.
  *
- * These are the values verified against the Zuidas datamodel: at 9 px the
- * sampled points read clearly as a field, and 12 000 probes hold the gradient
- * across the site without visible gaps. An earlier pass reduced both on the
- * theory that overlapping points were what made the field look like it painted
- * over the buildings; that misread the cause, and the smaller points just made
- * the field look thin and washed out. The depth setting is what governs the
- * occlusion, so the point size is left alone.
+ * At 9 px the sampled points read clearly as a field, and 12 000 probes hold
+ * the gradient across the site without visible gaps.
  */
 const POLLUTION_POINT_SIZE = 9;
 const POLLUTION_MAX_PROBES = 12000;

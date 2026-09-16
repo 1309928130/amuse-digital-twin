@@ -1,0 +1,36 @@
+{
+  "name": "3dvisualization-zuidas",
+  "version": "1.0.0",
+  "description": "3D visualization of Zuidas area using Cesium, OSM Buildings, and GTFS-realtime data",
+  "type": "module",
+  "main": "main.js",
+  "scripts": {
+    "start": "node start-all.js",
+    "dev": "node start-all.js",
+    "web": "npx http-server . -p 8080 -c-1",
+    "proxy": "node proxy-server.js",
+    "download-static": "node download-static-data.js",
+    "download-osm": "node download-osm-buildings.js",
+    "download-historical": "node download-historical-snapshots.js",
+    "extract-gtfs": "node extract-gtfs-schedule.js",
+    "download-3dbag": "node download-3dbag-tiles.js",
+    "sync-docs": "node tools/sync-framework-doc.mjs",
+    "check-docs": "node tools/sync-framework-doc.mjs --check"
+  },
+  "keywords": [
+    "cesium",
+    "3d",
+    "visualization",
+    "osm",
+    "gtfs"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.6.0",
+    "protobufjs": "^7.2.5",
+    "adm-zip": "^0.5.16"
+  },
+  "devDependencies": {}
+}
+

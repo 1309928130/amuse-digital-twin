@@ -1,0 +1,24 @@
+{
+  "source": "sunlight_analysis.glb (Ladybug Direct Sun Hours bake)",
+  "glb": "sunlight_analysis_wgs84ready.glb",
+  "crs_original": "EPSG:28992",
+  "note": "Source GLB used absolute RD-like coords (X=easting, Y=up, Z=-northing). Recentered to origin_rd for Cesium.",
+  "origin_rd": {
+    "x": 119490.70557484627,
+    "y": 483301.65286341746,
+    "z": 0.0
+  },
+  "placement_wgs84": {
+    "longitude": 4.866200480383374,
+    "latitude": 52.336492555681964,
+    "height": 0.0
+  },
+  "orientation_hint": {
+    "heading": 90,
+    "pitch": 0,
+    "roll": 0
+  },
+  "scale": 1.0,
+  "vertex_colors": true,
+  "material_note": "COLOR_0 present. baseColorFactor set to white, metallic=0, KHR_materials_unlit for Cesium falsecolour."
+}

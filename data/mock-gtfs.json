@@ -1,0 +1,44 @@
+{
+  "vehicles": [
+    {
+      "id": "vehicle_001",
+      "position": {
+        "latitude": 52.3375,
+        "longitude": 4.8625,
+        "bearing": 45,
+        "speed": 12.5
+      },
+      "vehicle": {
+        "id": "vehicle_001",
+        "label": "Tram 5"
+      }
+    },
+    {
+      "id": "vehicle_002",
+      "position": {
+        "latitude": 52.3380,
+        "longitude": 4.8630,
+        "bearing": 90,
+        "speed": 15.0
+      },
+      "vehicle": {
+        "id": "vehicle_002",
+        "label": "Bus 15"
+      }
+    },
+    {
+      "id": "vehicle_003",
+      "position": {
+        "latitude": 52.3370,
+        "longitude": 4.8620,
+        "bearing": 180,
+        "speed": 10.0
+      },
+      "vehicle": {
+        "id": "vehicle_003",
+        "label": "Tram 24"
+      }
+    }
+  ]
+}
+

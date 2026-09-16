@@ -1,0 +1,22 @@
+{
+  "source": "C:\\Users\\enshanchen\\XCarCity\\export_for_visualization.3dm",
+  "glb": "export_for_visualization.glb",
+  "crs_original": "EPSG:28992",
+  "origin_rd": {
+    "x": 119490.70557484627,
+    "y": 483301.65286341746,
+    "z": 0.0
+  },
+  "placement_wgs84": {
+    "longitude": 4.866200480383374,
+    "latitude": 52.336492555681964,
+    "height": 0.0
+  },
+  "orientation_hint": {
+    "heading": 90,
+    "pitch": 0,
+    "roll": 0
+  },
+  "n_meshes": 142,
+  "size_note": "Exported from Rhino 8; geometry centered at origin_rd"
+}

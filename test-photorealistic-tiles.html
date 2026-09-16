@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <script src="https://cesium.com/downloads/cesiumjs/releases/1.110/Build/Cesium/Cesium.js"></script>
+    <link href="https://cesium.com/downloads/cesiumjs/releases/1.110/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+    <style>
+        html, body, #cesiumContainer {
+            width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden;
+        }
+        #status {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0,0,0,0.8);
+            color: white;
+            padding: 15px;
+            border-radius: 5px;
+            z-index: 1000;
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            line-height: 1.6;
+        }
+        .success { color: #4CAF50; }
+        .error { color: #f44336; }
+        .info { color: #2196F3; }
+    </style>
+</head>
+<body>
+    <div id="cesiumContainer"></div>
+    <div id="status">
+        <div class="info">Loading Cesium library...</div>
+    </div>
+    
+    <script>
+        const statusDiv = document.getElementById('status');
+        const ION_TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI3NDc4OWRiOC0xODEyLTRlNWMtOGFjYy1mOGQxMzUxNTBlNGUiLCJpZCI6MzY3MjA4LCJpYXQiOjE3NjUwMzY5MDh9.aL2ynDWMJ0hS7Tl7x3EYo62hXZV5oV-DNgFoljfrKy4';
+        
+        function updateStatus(message, className = 'info') {
+            statusDiv.innerHTML = '<div class="' + className + '">' + message + '</div>';
+            console.log('[Status]', message);
+        }
+        
+        function initTest() {
+            // Check if Cesium is loaded
+            if (typeof Cesium === 'undefined') {
+                updateStatus('ERROR: Cesium library failed to load. Check browser console for errors.', 'error');
+                return;
+            }
+            
+            updateStatus('Cesium loaded. Version: ' + (Cesium.VERSION || 'unknown') + '<br>Setting Ion token...', 'info');
+            
+            try {
+                Cesium.Ion.defaultAccessToken = ION_TOKEN;
+                console.log('Ion token set');
+            } catch (e) {
+                updateStatus('ERROR setting Ion token: ' + e.message, 'error');
+                return;
+            }
+            
+            updateStatus('Creating Cesium viewer...', 'info');
+            
+            let viewer;
+            try {
+                // Check if Google geocoder is available
+                let geocoderOption = true; // Default geocoder
+                
+                // Try to use Google geocoder if available
+                if (Cesium.IonGeocodeProviderType && Cesium.IonGeocodeProviderType.GOOGLE) {
+                    geocoderOption = Cesium.IonGeocodeProviderType.GOOGLE;
+                    console.log('Using Google geocoder');
+                } else {
+                    console.warn('Google geocoder not available, using default geocoder');
+                }
+                
+                viewer = new Cesium.Viewer("cesiumContainer", {
+                    timeline: false,
+                    animation: false,
+                    sceneModePicker: false,
+                    baseLayerPicker: false,
+                    geocoder: geocoderOption,
+                    globe: false,
+                });
+                
+                viewer.scene.skyAtmosphere.show = true;
+                updateStatus('Viewer created. Checking for Photorealistic Tiles function...', 'info');
+            } catch (e) {
+                updateStatus('ERROR creating viewer: ' + e.message, 'error');
+                console.error('Error creating viewer:', e);
+                return;
+            }
+            
+            // Check if function exists
+            if (typeof Cesium.createGooglePhotorealistic3DTileset !== 'function') {
+                updateStatus('ERROR: createGooglePhotorealistic3DTileset function not available.<br><br>' +
+                            'Cesium version: ' + (Cesium.VERSION || 'unknown') + '<br><br>' +
+                            'This feature requires Cesium 1.110+ and may not be available in your build.', 'error');
+                viewer.scene.globe.show = true;
+                return;
+            }
+            
+            updateStatus('Function found! Attempting to load Google Photorealistic 3D Tiles...', 'info');
+            
+            // Try to create the tileset with timeout
+            const timeout = setTimeout(() => {
+                updateStatus('ERROR: Request timed out after 30 seconds.<br><br>' +
+                            'This usually means:<br>' +
+                            '1. Your account does not have access<br>' +
+                            '2. Network/API issue<br>' +
+                            '3. The service is unavailable', 'error');
+                viewer.scene.globe.show = true;
+            }, 30000);
+            
+            // Create tileset options - onlyUsingWithGoogleGeocoder is optional
+            const tilesetOptions = {};
+            // Only add this option if we're actually using Google geocoder
+            if (usingGoogleGeocoder) {
+                tilesetOptions.onlyUsingWithGoogleGeocoder = true;
+            }
+            
+            Cesium.createGooglePhotorealistic3DTileset(tilesetOptions)
+            .then(tileset => {
+                clearTimeout(timeout);
+                viewer.scene.primitives.add(tileset);
+                
+                updateStatus('✓ SUCCESS: Google Photorealistic 3D Tiles loaded!<br><br>' +
+                            'Your account HAS ACCESS to this feature.<br><br>' +
+                            'Camera positioned at Googleplex (example location).', 'success');
+                
+                viewer.scene.camera.setView({
+                    destination: new Cesium.Cartesian3(
+                        -2693797.551060477,
+                        -4297135.517094725,
+                        3854700.7470414364,
+                    ),
+                    orientation: new Cesium.HeadingPitchRoll(
+                        4.6550106925119925,
+                        -0.2863894863138836,
+                        1.3561760425773173e-7,
+                    ),
+                });
+                
+                console.log('SUCCESS: Google Photorealistic 3D Tiles loaded');
+            })
+            .catch(error => {
+                clearTimeout(timeout);
+                let errorMessage = error.message || error.toString();
+                
+                updateStatus('✗ ERROR: Could not load Google Photorealistic 3D Tiles<br><br>' +
+                            '<strong>Error:</strong> ' + errorMessage + '<br><br>' +
+                            '<strong>Possible reasons:</strong><br>' +
+                            '1. Your account does not have access to this feature<br>' +
+                            '2. Token may be expired or invalid<br>' +
+                            '3. Feature may require a paid Cesium Ion plan<br>' +
+                            '4. Network/API issue<br>' +
+                            '5. Google Photorealistic Tiles may not be available in your region<br><br>' +
+                            '<strong>Check browser console (F12) for more details.</strong>', 'error');
+                
+                console.error('Error loading Photorealistic 3D Tiles:', error);
+                
+                viewer.scene.globe.show = true;
+                viewer.scene.camera.setView({
+                    destination: Cesium.Cartesian3.fromDegrees(4.8625, 52.3375, 1000),
+                    orientation: {
+                        heading: Cesium.Math.toRadians(0),
+                        pitch: Cesium.Math.toRadians(-90),
+                        roll: 0.0
+                    }
+                });
+            });
+        }
+        
+        // Wait for Cesium to load
+        let checkCount = 0;
+        const maxChecks = 15;
+        const checkInterval = setInterval(() => {
+            checkCount++;
+            if (typeof Cesium !== 'undefined') {
+                clearInterval(checkInterval);
+                setTimeout(initTest, 500); // Small delay to ensure Cesium is fully initialized
+            } else if (checkCount >= maxChecks) {
+                clearInterval(checkInterval);
+                updateStatus('ERROR: Cesium library did not load after 15 seconds.<br>' +
+                            'Please check your internet connection and browser console.', 'error');
+            }
+        }, 1000);
+    </script>
+</body>
+</html>

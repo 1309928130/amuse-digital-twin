@@ -1,0 +1,1400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zuidas 3D Visualization</title>
+    <script src="https://cesium.com/downloads/cesiumjs/releases/1.110/Build/Cesium/Cesium.js"></script>
+    <link href="https://cesium.com/downloads/cesiumjs/releases/1.110/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+    <!-- Protobuf.js from CDN - load before modules -->
+    <script src="https://cdn.jsdelivr.net/npm/protobufjs@7.2.5/dist/protobuf.min.js"></script>
+    <style>
+        html, body, #cesiumContainer {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+        }
+        #loadingIndicator {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 20px;
+            border-radius: 5px;
+            z-index: 1000;
+            display: none;
+        }
+        /* Draggable panel styles */
+        .draggable-panel {
+            cursor: move;
+            user-select: none;
+            touch-action: none;
+            pointer-events: auto;
+        }
+        .draggable-panel.dragging {
+            cursor: grabbing;
+            opacity: 0.9;
+        }
+        /*
+         * Legend data carriers: hidden sources for values mirrored into the
+         * right parameter panel. They must never be displayed themselves.
+         */
+        #sunlightLegend,
+        #urbanHeatLegend,
+        #networkFlowLegend,
+        #demandHeatLegend {
+            display: none !important;
+        }
+
+        /* ============ Document view (reading pages) ============ */
+        /*
+         * Light theme, matching how the source Markdown renders on GitHub.
+         * The document was authored for a white page and bakes in light-mode
+         * inline styles (table borders, header fills), so keeping the reader on
+         * white avoids fighting them. The app chrome around it stays dark.
+         */
+        #docView {
+            position: absolute;
+            /* On a document page the right panel stays visible and carries the
+               table of contents, so the document keeps clear of its column and
+               the reader can jump around without leaving the page. */
+            inset: var(--nav-height) var(--right-panel-width) 0 0;
+            z-index: 900;
+            display: flex;
+            flex-direction: column;
+            background: #ffffff;
+            color: #1f2328;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+        #docView[hidden] {
+            display: none;
+        }
+        .doc-view-body {
+            flex: 1 1 auto;
+            overflow-y: auto;
+            overflow-x: hidden;
+            padding: 30px 0 90px;
+            scroll-behavior: smooth;
+        }
+        .doc-view-loading {
+            padding: 40px 22px;
+            color: #59636e;
+            font-size: 13px;
+        }
+
+        /* --- Rendered Markdown --- */
+        .doc {
+            max-width: 860px;
+            margin: 0 auto;
+            padding: 0 32px;
+            font-size: 14.5px;
+            line-height: 1.68;
+            color: #1f2328;
+        }
+        .doc h1,
+        .doc h2,
+        .doc h3,
+        .doc h4 {
+            line-height: 1.3;
+            font-weight: 600;
+            color: #1f2328;
+            scroll-margin-top: 18px;
+        }
+        .doc h1 {
+            font-size: 27px;
+            margin: 8px 0 22px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid #d1d9e0;
+        }
+        .doc h2 {
+            font-size: 20px;
+            margin: 40px 0 14px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #d1d9e0;
+        }
+        .doc h3 {
+            font-size: 16px;
+            margin: 28px 0 10px;
+        }
+        .doc h4 {
+            font-size: 14.5px;
+            margin: 22px 0 8px;
+            color: #424a53;
+        }
+        .doc p {
+            margin: 0 0 14px;
+        }
+        .doc a {
+            color: #0969da;
+            text-decoration: none;
+        }
+        .doc a:hover {
+            text-decoration: underline;
+        }
+        .doc strong {
+            color: #1f2328;
+            font-weight: 600;
+        }
+        .doc code {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 0.88em;
+            background: #f0f1f3;
+            padding: 1px 5px;
+            border-radius: 3px;
+        }
+        .doc-pre {
+            background: #f6f8fa;
+            border: 1px solid #d1d9e0;
+            border-radius: 5px;
+            padding: 12px 14px;
+            overflow-x: auto;
+            margin: 0 0 16px;
+        }
+        .doc-pre code {
+            background: none;
+            padding: 0;
+            font-size: 12.5px;
+            line-height: 1.5;
+        }
+        .doc-list {
+            margin: 0 0 14px;
+            padding-left: 22px;
+        }
+        .doc-list li {
+            margin-bottom: 6px;
+        }
+        /*
+         * Figures vs. icons.
+         *
+         * The document uses <img> for two quite different things: full-width
+         * figures (which should be centred blocks) and 16x16 favicons embedded
+         * inside sentences and links (which must stay in the text flow — as
+         * blocks they get pushed onto their own line and stack up on the right).
+         *
+         * A structural selector cannot tell them apart: the favicon sits alone
+         * inside its <a>, so it also matches `:only-child`. The reliable signal
+         * is the source markup — the icons carry explicit width/height
+         * attributes, the figures do not.
+         */
+        .doc img {
+            max-width: 100%;
+            height: auto;
+            border-radius: 5px;
+            background: #fff;
+            display: block;
+            margin: 6px auto 18px;
+        }
+        /*
+         * Icons are favicons embedded in sentences. Sized to match the source
+         * markup (16x16) and seated on the text baseline.
+         */
+        .doc img[width][height] {
+            display: inline;
+            width: 16px;
+            height: 16px;
+            max-width: none;
+            margin: 0 4px 0 0;
+            border-radius: 2px;
+            vertical-align: text-bottom;
+        }
+        .doc hr {
+            border: none;
+            border-top: 1px solid #d1d9e0;
+            margin: 32px 0;
+        }
+        .doc blockquote {
+            margin: 0 0 16px;
+            padding: 4px 0 4px 16px;
+            border-left: 3px solid #d1d9e0;
+            color: #424a53;
+        }
+        .doc-table-wrap {
+            overflow-x: auto;
+            margin: 0 0 18px;
+        }
+        .doc-table {
+            border-collapse: collapse;
+            width: 100%;
+            font-size: 13px;
+        }
+        .doc-table th,
+        .doc-table td {
+            border: 1px solid #d1d9e0;
+            padding: 7px 11px;
+            text-align: left;
+            vertical-align: top;
+        }
+        .doc-table th {
+            background: #f6f8fa;
+            font-weight: 600;
+            color: #1f2328;
+        }
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: grab;
+            padding: 5px 0;
+            margin-bottom: 8px;
+            border-bottom: 1px solid rgba(255,255,255,0.3);
+            user-select: none;
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            min-height: 25px; /* Ensure there's space to click even if content is small */
+            touch-action: none;
+        }
+        .panel-header:hover {
+            background: rgba(255,255,255,0.05);
+            border-radius: 3px;
+        }
+        /* Make entire header draggable - children won't block events */
+        .panel-header * {
+            pointer-events: none !important; /* Disable pointer events on children, let header handle them */
+        }
+        .panel-header .panel-minimize-btn {
+            pointer-events: auto !important; /* Re-enable for minimize button */
+            cursor: pointer !important; /* Show pointer cursor on button */
+        }
+        .panel-title {
+            font-weight: bold;
+            font-size: 13px;
+            flex: 1;
+            pointer-events: none !important; /* Ensure title text doesn't block dragging */
+        }
+        .panel-minimize-btn {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 16px;
+            cursor: pointer;
+            padding: 0 5px;
+            line-height: 1;
+            opacity: 0.7;
+        }
+        .panel-minimize-btn:hover {
+            opacity: 1;
+        }
+        .panel-content {
+            transition: max-height 0.3s ease, opacity 0.3s ease;
+            overflow: hidden;
+        }
+        .panel-content.minimized {
+            max-height: 0 !important;
+            opacity: 0;
+            margin: 0;
+            padding: 0;
+        }
+        /* Special handling for building legend scrollable content */
+        .panel-content.scrollable {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .panel-content.scrollable.minimized {
+            max-height: 0 !important;
+            overflow: hidden;
+        }
+        /* SUMO Time Slider Styles */
+        #sumoTimeSlider {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 600px;
+            max-width: 80%;
+            background: rgba(42, 42, 42, 0.9);
+            padding: 15px 20px;
+            border-radius: 8px;
+            z-index: 10000;
+            display: none;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+        }
+        #sumoTimeSlider.visible {
+            display: block;
+        }
+        #sumoTimeSlider .slider-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            color: white;
+            font-family: sans-serif;
+            font-size: 14px;
+        }
+        #sumoTimeSlider .slider-title {
+            font-weight: bold;
+        }
+        #sumoTimeSlider .slider-time {
+            font-family: monospace;
+            font-size: 16px;
+            color: #4CAF50;
+        }
+        #sumoTimeSlider .slider-container {
+            position: relative;
+            margin: 10px 0;
+        }
+        #sumoTimeSlider input[type="range"] {
+            width: 100%;
+            height: 8px;
+            border-radius: 4px;
+            background: rgba(255, 255, 255, 0.2);
+            outline: none;
+            -webkit-appearance: none;
+        }
+        #sumoTimeSlider input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #4CAF50;
+            cursor: pointer;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+        }
+        #sumoTimeSlider input[type="range"]::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #4CAF50;
+            cursor: pointer;
+            border: none;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+        }
+        #sumoTimeSlider .slider-controls {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        #sumoTimeSlider .slider-btn {
+            background: rgba(76, 175, 80, 0.8);
+            border: none;
+            color: white;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            font-family: sans-serif;
+        }
+        #sumoTimeSlider .slider-btn:hover {
+            background: rgba(76, 175, 80, 1);
+        }
+        #sumoTimeSlider .slider-btn:active {
+            background: rgba(76, 175, 80, 0.6);
+        }
+        #sumoTimeSlider .slider-btn.pause {
+            background: rgba(255, 152, 0, 0.8);
+        }
+        #sumoTimeSlider .slider-btn.pause:hover {
+            background: rgba(255, 152, 0, 1);
+        }
+
+        /* ============================================================
+           Assessment pages: top navigation + right parameter panel
+           ============================================================ */
+        :root {
+            --nav-height: 46px;
+            /* Parameter panel: ~70% of the earlier 20vw */
+            --right-panel-width: 14vw;
+        }
+
+        /* ---- Top navigation bar ---- */
+        #topNav {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: var(--nav-height);
+            z-index: 1002;
+            background: rgba(24, 24, 24, 0.93);
+            backdrop-filter: blur(10px);
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            padding: 0 10px;
+            box-sizing: border-box;
+            color: #fff;
+            font-family: sans-serif;
+            overflow-x: auto;
+            overflow-y: hidden;
+            white-space: nowrap;
+            scrollbar-width: none;
+        }
+        #topNav::-webkit-scrollbar {
+            display: none;
+        }
+        #topNav .nav-brand {
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 0.03em;
+            padding-right: 12px;
+            margin-right: 4px;
+            border-right: 1px solid rgba(255, 255, 255, 0.16);
+            flex: 0 0 auto;
+            line-height: 1.2;
+        }
+        #topNav .nav-brand small {
+            display: block;
+            font-size: 9.5px;
+            font-weight: 400;
+            opacity: 0.5;
+            letter-spacing: 0.05em;
+        }
+        #topNav .nav-divider {
+            width: 1px;
+            height: 20px;
+            background: rgba(255, 255, 255, 0.14);
+            margin: 0 6px;
+            flex: 0 0 auto;
+        }
+        /* Borderless, pure buttons */
+        #topNav .nav-btn {
+            background: none;
+            border: 0;
+            outline: none;
+            box-shadow: none;
+            color: rgba(255, 255, 255, 0.78);
+            font-family: inherit;
+            font-size: 12.5px;
+            line-height: 1;
+            padding: 8px 11px;
+            border-radius: 5px;
+            cursor: pointer;
+            flex: 0 0 auto;
+            transition: background 0.15s ease, color 0.15s ease;
+        }
+        #topNav .nav-btn:hover {
+            background: rgba(255, 255, 255, 0.09);
+            color: #fff;
+        }
+        #topNav .nav-btn:focus-visible {
+            background: rgba(255, 255, 255, 0.13);
+            color: #fff;
+        }
+        #topNav .nav-btn.active {
+            background: rgba(255, 255, 255, 0.17);
+            color: #fff;
+            font-weight: 600;
+        }
+
+        /* ---- Right parameter panel ---- */
+        #paramPanel {
+            position: absolute;
+            top: var(--nav-height);
+            right: 0;
+            bottom: 0;
+            width: var(--right-panel-width);
+            min-width: 200px;
+            max-width: 300px;
+            z-index: 1000;
+            background: rgba(24, 24, 24, 0.88);
+            backdrop-filter: blur(8px);
+            color: #fff;
+            font-family: sans-serif;
+            padding: 12px 12px 22px;
+            box-sizing: border-box;
+            overflow-y: auto;
+        }
+        #paramPanel .param-scope {
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            opacity: 0.45;
+            margin-bottom: 4px;
+        }
+        #paramPanel .param-title {
+            font-size: 14px;
+            font-weight: 600;
+            line-height: 1.3;
+            margin-bottom: 12px;
+        }
+        #paramPanel .param-section {
+            margin-bottom: 18px;
+        }
+        #paramPanel .param-section-title {
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            opacity: 0.5;
+            margin-bottom: 7px;
+        }
+        #paramPanel .param-row {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            font-size: 12px;
+            padding: 3px 0;
+            cursor: pointer;
+        }
+        #paramPanel .param-help {
+            font-size: 11px;
+            line-height: 1.45;
+            opacity: 0.65;
+            margin-top: 6px;
+        }
+        /* Caveat note: reads as a warning without shouting, so the legend above
+           it stays the focus. */
+        #paramPanel .param-provisional {
+            opacity: 0.9;
+            margin-top: 8px;
+            padding: 7px 9px;
+            border-left: 3px solid #d98a00;
+            background: rgba(217, 138, 0, 0.12);
+            border-radius: 3px;
+        }
+        /* On the framework page the panel sits beside a white document rather
+           than over the dark globe, so it adopts the document's light theme.
+           The dark-on-dark toggle/legend styles would be unreadable otherwise. */
+        #paramPanel.panel-light {
+            background: #ffffff;
+            color: #1f2328;
+            border-left: 1px solid #d1d9e0;
+            backdrop-filter: none;
+        }
+        #paramPanel.panel-light .param-scope {
+            opacity: 0.55;
+        }
+        /* Table of contents (framework page).
+           A plain nested anchor list, styled after GitHub's own sidebar so the
+           panel reads as part of the document it indexes. */
+        .toc-nav {
+            font-size: 12px;
+            line-height: 1.5;
+        }
+        .toc-list {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+        }
+        /* Level 2+ are indented by depth, matching the heading hierarchy. */
+        .toc-list .toc-list {
+            padding-left: 11px;
+            margin-top: 2px;
+            border-left: 1px solid #d8dee4;
+        }
+        .toc-item {
+            margin: 0;
+        }
+        .toc-link {
+            display: block;
+            padding: 3px 8px;
+            border-radius: 4px;
+            color: #59636e;
+            text-decoration: none;
+            cursor: pointer;
+            /* Long headings wrap rather than overflowing the narrow column. */
+            overflow-wrap: anywhere;
+        }
+        .toc-link:hover {
+            background: #eef1f4;
+            color: #1f2328;
+        }
+        .toc-link.is-active {
+            background: #ddf4ff;
+            color: #0969da;
+            font-weight: 600;
+        }
+        /* Top-level entries carry the section weight; deeper ones stay quiet. */
+        .toc-level-1 > .toc-link,
+        .toc-level-2 > .toc-link {
+            color: #1f2328;
+            font-weight: 600;
+        }
+        .toc-level-2 > .toc-link {
+            font-weight: 500;
+        }
+        .toc-empty {
+            font-size: 12px;
+            opacity: 0.6;
+        }
+        #paramPanel .param-placeholder {
+            font-size: 12px;
+            line-height: 1.5;
+            opacity: 0.75;
+            background: rgba(255, 255, 255, 0.06);
+            border-radius: 5px;
+            padding: 10px;
+        }
+        #paramPanel .legend-bar {
+            height: 14px;
+            border-radius: 3px;
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            margin-bottom: 6px;
+        }
+        #paramPanel .legend-scale {
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            opacity: 0.9;
+        }
+        #paramPanel a {
+            color: #8fc7ff;
+        }
+        /* The light theme must beat the id-scoped link colour above, which was
+           chosen for contrast against the dark panel and is illegible on white.
+           The TOC links carry their own colours below. */
+        #paramPanel.panel-light a {
+            color: #0969da;
+        }
+        #paramPanel.panel-light .toc-link {
+            color: #59636e;
+        }
+        #paramPanel.panel-light .toc-link:hover {
+            color: #1f2328;
+        }
+        #paramPanel.panel-light .toc-link.is-active {
+            color: #0969da;
+        }
+        #paramPanel.panel-light .toc-level-1 > .toc-link,
+        #paramPanel.panel-light .toc-level-2 > .toc-link {
+            color: #1f2328;
+        }
+        #paramPanel.panel-light .toc-level-2 > .toc-link {
+            color: #3d444d;
+        }
+
+        /* ---- Global legends: collapsible accordion at the panel bottom ---- */
+        #paramPanel .param-section-title.param-accordion {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 6px;
+            cursor: pointer;
+            user-select: none;
+            padding: 5px 0;
+            margin: 0;
+        }
+        #paramPanel .param-section-title.param-accordion:hover {
+            opacity: 0.85;
+        }
+        #paramPanel .param-accordion .chevron {
+            font-size: 9px;
+            opacity: 0.7;
+            transition: transform 0.18s ease;
+        }
+        #paramPanel .param-accordion[aria-expanded="true"] .chevron {
+            transform: rotate(90deg);
+        }
+        /* Folded by default so the panel keeps room for page-specific content */
+        #paramPanel .param-fold {
+            display: none;
+            padding: 2px 0 4px;
+        }
+        #paramPanel .param-fold.open {
+            display: block;
+        }
+        #paramPanel .param-group-divider {
+            height: 1px;
+            background: rgba(255, 255, 255, 0.12);
+            margin: 18px 0 12px;
+        }
+        /* Nested controls inside the global legends */
+        #paramPanel select.param-select {
+            width: 100%;
+            padding: 4px 5px;
+            border-radius: 3px;
+            background: rgba(42, 42, 42, 0.95);
+            color: #fff;
+            border: 1px solid rgba(255, 255, 255, 0.24);
+            font-family: inherit;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        #paramPanel .param-scroll {
+            max-height: 210px;
+            overflow-y: auto;
+            padding-right: 2px;
+        }
+
+        /* Keep the Cesium credit line clear of the right panel */
+        .cesium-viewer-bottom {
+            right: calc(var(--right-panel-width) + 8px) !important;
+        }
+
+    </style>
+</head>
+<body>
+    <div id="cesiumContainer"></div>
+    <div id="loadingIndicator">Loading...</div>
+
+    <!-- ===================== Top navigation ====================== -->
+    <nav id="topNav" aria-label="Assessment pages">
+        <div class="nav-brand">Multisensory Digital Twin<small>Zuidas · AMUSE</small></div>
+        <!-- Buttons are generated from src/pageConfig.js -->
+        <div id="navButtons" style="display: flex; align-items: center; gap: 2px;"></div>
+    </nav>
+
+    <!--
+        ================= Document view ===================
+        Some pages are reading pages rather than places (currently "The
+        framework"). They take over the viewport instead of showing the globe,
+        so the Cesium canvas is hidden behind them. The Markdown is rendered at
+        runtime by src/docView.js from framework/README.md, which is a copy of
+        the docs repo kept in step by `npm run sync-docs`.
+    -->
+    <section id="docView" aria-label="Document view" hidden>
+        <div class="doc-view-body" id="docViewBody">
+            <div class="doc-view-loading">Loading…</div>
+        </div>
+    </section>
+
+    <!-- ================= Right parameter panel =================== -->
+    <aside id="paramPanel" aria-label="Page parameters and legend">
+        <div class="param-scope" id="paramPanelScope"></div>
+        <div class="param-title" id="paramPanelTitle">Loading…</div>
+        <div class="param-placeholder" id="paramPanelPlaceholder" style="display: none;"></div>
+
+        <!-- Section: layer toggles (all assessment pages) -->
+        <div class="param-section" data-section-id="layers">
+            <div class="param-section-title">Layers</div>
+            <label class="param-row">
+                <input type="checkbox" id="networkFlowSwitch">
+                <span>Pedestrian flow (links)</span>
+            </label>
+            <label class="param-row">
+                <input type="checkbox" id="pedDemandSwitch">
+                <span>Pedestrian demand</span>
+            </label>
+            <label class="param-row">
+                <input type="checkbox" id="urbanHeatSwitch">
+                <span>Urban heat field</span>
+            </label>
+            <label class="param-row">
+                <input type="checkbox" id="sunlightSwitch">
+                <span>Sunlight mesh</span>
+            </label>
+            <label class="param-row">
+                <input type="checkbox" id="windSwitch">
+                <span>Wind field (CFD)</span>
+            </label>
+            <label class="param-row">
+                <input type="checkbox" id="pollutionSwitch">
+                <span>Pollutant concentration</span>
+            </label>
+        </div>
+
+        <!-- Section: flow scope -->
+        <div class="param-section" data-section-id="flow-scope">
+            <div class="param-section-title">Assessment scope</div>
+            <div class="param-help">
+                Macroscopic PedMac model over the full case area (several km²).
+                Hover a link for its hourly flow profile; click to pin the panel.
+            </div>
+        </div>
+
+        <!-- Section: micro scope -->
+        <div class="param-section" data-section-id="micro-scope">
+            <div class="param-section-title">Assessment scope</div>
+            <div class="param-help">
+                Station square in front of Amsterdam Zuid, ~350 m across.
+                Click a link to pin its values.
+            </div>
+        </div>
+
+        <!-- Section: overlap opacity -->
+        <div class="param-section" data-section-id="overlap-opacity">
+            <div class="param-section-title">Overlay read-out</div>
+            <label class="param-row">
+                <input type="checkbox" id="overlapFlowOnly">
+                <span>Flow only</span>
+            </label>
+            <label class="param-row">
+                <input type="checkbox" id="overlapHeatOnly">
+                <span>Heat only</span>
+            </label>
+            <div class="param-help">
+                Layers stay on together for comparison. Hover is disabled here —
+                click a link to inspect it without cluttering the overlay.
+            </div>
+        </div>
+
+        <!-- Section: flow legend -->
+        <div class="param-section" data-section-id="legend-flow">
+            <div class="param-section-title">Pedestrian flow</div>
+            <div class="legend-bar" id="panelledFlowBar"></div>
+            <div class="legend-scale"><span>0</span><span id="panelledFlowMax">…</span></div>
+            <div class="param-help">pedestrians / day (P95 cap), YlOrRd</div>
+        </div>
+
+        <!-- Section: demand legend -->
+        <div class="param-section" data-section-id="legend-demand">
+            <div class="param-section-title">Pedestrian demand</div>
+            <div class="legend-bar" id="panelledDemandBar"
+                 style="background: linear-gradient(to right, #0000ff, #00ffff, #00ff00, #ffff00, #ff0000);"></div>
+            <div class="legend-scale"><span>0</span><span id="panelledDemandMax">…</span></div>
+            <div class="param-help">trip generation, trips / day (P95 cap)</div>
+        </div>
+
+        <!-- Section: heat legend -->
+        <div class="param-section" data-section-id="legend-heat">
+            <div class="param-section-title">Urban heat</div>
+            <div class="legend-bar" id="panelledHeatBar"
+                 style="background: linear-gradient(to right, #0000ff, #00ffff, #00ff00, #ffff00, #ff0000);"></div>
+            <div class="legend-scale"><span>Cooler</span><span>Warmer</span></div>
+            <div class="param-help">Simulation field colours (Ladybug / Grasshopper export)</div>
+        </div>
+
+        <!-- Section: sunlight legend -->
+        <div class="param-section" data-section-id="legend-sunlight">
+            <div class="param-section-title">Direct sun hours</div>
+            <div class="legend-bar"
+                 style="background: linear-gradient(to right, #2c2c8a, #e74c3c, #f1c40f);"></div>
+            <div class="legend-scale"><span>Fewer hours</span><span>More hours</span></div>
+            <div class="param-help">
+                Ladybug falsecolour baked to a mesh. The design massing is hidden while this layer is on.
+            </div>
+        </div>
+
+        <!-- Section: wind legend -->
+        <div class="param-section" data-section-id="legend-wind">
+            <div class="param-section-title">Wind speed</div>
+            <div class="legend-bar" id="panelledWindBar"
+                 style="background: linear-gradient(to right, #0000ff, #00ffff, #00ff00, #ffff00, #ff0000);"></div>
+            <div class="legend-scale"><span>0 m/s</span><span id="panelledWindMax">15 m/s</span></div>
+            <div class="param-help">
+                Eddy3D / OpenFOAM probe field, arrows scaled by direction.
+                Ramp capped at 15 m/s; probes above the cap are hidden as
+                implausible for a 5 m/s inlet run.
+            </div>
+            <div class="param-help param-provisional" id="windProvisionalNote">
+                Provisional — the case shows speeds far above the 5 m/s inlet in the
+                building wake, which points to incomplete solver convergence. Treat
+                the pattern as indicative and re-run before drawing conclusions.
+            </div>
+        </div>
+
+        <!-- Placeholder legends for pages without results yet -->
+        <div class="param-section" data-section-id="legend-noise">
+            <div class="param-section-title">Noise level</div>
+            <div class="legend-bar"
+                 style="background: linear-gradient(to right, #2e7d32, #cddc39, #ff9800, #d32f2f, #6a1b9a);"></div>
+            <div class="legend-scale"><span>Quiet</span><span>Loud</span></div>
+            <div class="param-help">Pachyderm Acoustics, dB(A) Lden — scale reserved.</div>
+        </div>
+        <div class="param-section" data-section-id="legend-pollution">
+            <div class="param-section-title">Pollutant concentration</div>
+            <div class="legend-bar" id="panelledPollutionBar"
+                 style="background: linear-gradient(to right, #1b5e20, #aed581, #ffee58, #fb8c00, #b71c1c);"></div>
+            <div class="legend-scale"><span>0</span><span id="panelledPollutionMax">…</span></div>
+            <div class="param-help">
+                OpenFOAM passive scalar (<code>s</code>) on the wind case.
+                Values are <b>relative</b>, not µg/m³: the run used a placeholder
+                emission rate, so compare patterns between locations rather than
+                absolute exposure. Ramp capped at the 95th percentile.
+            </div>
+        </div>
+        <div class="param-section" data-section-id="legend-visibility">
+            <div class="param-section-title">Visual quality</div>
+            <div class="legend-bar"
+                 style="background: linear-gradient(to right, #37474f, #78909c, #cfd8dc);"></div>
+            <div class="legend-scale"><span>Poor</span><span>Good</span></div>
+            <div class="param-help">Street-level indicators — scale reserved.</div>
+        </div>
+
+        <!-- Section: method tables -->
+        <div class="param-section" data-section-id="placeholder-method">
+            <div class="param-section-title">Method</div>
+            <div class="param-help">
+                See <a href="https://github.com/1309928130/MultSensory-Digital-Twins" target="_blank"
+                       rel="noopener">the AMUSE framework</a> for the input data, software and output of this module.
+            </div>
+        </div>
+        <div class="param-section" data-section-id="sunlight-method">
+            <div class="param-section-title">Method</div>
+            <div class="param-help">
+                3D building geometries + EPW climate data → <b>Ladybug</b> (Grasshopper) →
+                direct sun hours per mesh face, baked and exported as glTF with vertex colours.
+            </div>
+        </div>
+        <div class="param-section" data-section-id="heat-method">
+            <div class="param-section-title">Method</div>
+            <div class="param-help">
+                Wind results + 3D buildings + climate data → urban heat / thermal comfort maps.
+                Shown here as the Grasshopper vector field export.
+            </div>
+        </div>
+
+        <!-- Section: case studies -->
+        <div class="param-section" data-section-id="cases-list">
+            <div class="param-section-title">Proposal studies</div>
+            <label class="param-row">
+                <input type="radio" name="caseStudy" value="proposal-1" checked>
+                <span>Proposal 1 — <em>to be added</em></span>
+            </label>
+            <label class="param-row">
+                <input type="radio" name="caseStudy" value="proposal-2">
+                <span>Proposal 2 — <em>to be added</em></span>
+            </label>
+            <label class="param-row">
+                <input type="radio" name="caseStudy" value="proposal-3">
+                <span>Proposal 3 — <em>to be added</em></span>
+            </label>
+            <div class="param-help">
+                Each study will carry its own prepared assessment datasets; the pages above
+                then read the selected study.
+            </div>
+        </div>
+
+        <!-- Section: framework info -->
+        <div class="param-section" data-section-id="framework-info">
+            <div class="param-section-title">AMUSE</div>
+            <div class="param-help">
+                <b>Assessing Multisensory User Experience</b> — a design-stage workflow for
+                comparing movement, sunlight, wind, pollution, heat, noise, and visibility on
+                one street-level grid.
+                <br><br>
+                The full documentation is rendered on this page.
+                <br><br>
+                <a href="https://github.com/1309928130/MultSensory-Digital-Twins" target="_blank"
+                   rel="noopener">github.com/1309928130/MultSensory-Digital-Twins</a>
+            </div>
+        </div>
+
+        <!-- Section: table of contents (framework page).
+             Filled at runtime by docView.js from the rendered headings, so it
+             can never drift out of sync with the document. -->
+        <div class="param-section" data-section-id="toc">
+            <div class="param-section-title">Contents</div>
+            <nav class="toc-nav" id="docToc" aria-label="Document contents">
+                <div class="toc-empty">Open the document to build the contents.</div>
+            </nav>
+        </div>
+
+        <!-- ============ Global legends (shared across all pages) ============ -->
+        <!-- Wrapped so the page controller can hide the whole block at once on
+             reading pages, where scene controls are meaningless. -->
+        <div id="globalLegendsBlock">
+            <div class="param-group-divider" id="globalLegendsDivider"></div>
+            <div class="param-section-title" style="margin-bottom: 8px;">Global</div>
+
+        <!-- Display modes + transit routes (always relevant) -->
+        <div class="param-section" data-global="display">
+            <div class="param-section-title param-accordion" data-fold-key="display" aria-expanded="false">
+                <span>Display &amp; transit</span><span class="chevron">▶</span>
+            </div>
+            <div class="param-fold">
+                <label class="param-row" style="flex-direction: column; align-items: stretch; gap: 5px;">
+                    <span style="opacity: 0.7; font-size: 11px;">Display mode</span>
+                    <select id="modeSelect" class="param-select">
+                        <option value="realtime">Real-time Mode</option>
+                        <option value="offline">Offline Mode</option>
+                        <option value="analytical">Analytical Mode (No Shadows)</option>
+                        <option value="sumo">SUMO Simulation</option>
+                    </select>
+                </label>
+                <div id="dateSelectorContainer" style="display: none; margin-top: 6px;">
+                    <label style="display: flex; flex-direction: column; gap: 5px;">
+                        <span style="font-size: 11px; opacity: 0.7;">Select date</span>
+                        <select id="dateSelect" class="param-select">
+                            <option value="">Loading dates...</option>
+                        </select>
+                    </label>
+                </div>
+                <label class="param-row" style="margin-top: 6px;">
+                    <input type="checkbox" id="routesSwitch">
+                    <span>Transit routes</span>
+                </label>
+            </div>
+        </div>
+
+        <!-- 3D models -->
+        <div class="param-section" data-global="models">
+            <div class="param-section-title param-accordion" data-fold-key="models" aria-expanded="false">
+                <span>3D models</span><span class="chevron">▶</span>
+            </div>
+            <div class="param-fold">
+                <label class="param-row">
+                    <input type="checkbox" id="osmOnlineSwitch">
+                    <span>OSM (online)</span>
+                </label>
+                <label class="param-row">
+                    <input type="checkbox" id="osmLocalSwitch">
+                    <span>OSM (local)</span>
+                </label>
+                <label class="param-row">
+                    <input type="checkbox" id="threedbagSwitch">
+                    <span>3DBAG (online)</span>
+                </label>
+                <label class="param-row">
+                    <input type="checkbox" id="zuidasGlbSwitch">
+                    <span>Zuidas Datamodel (GLB)</span>
+                </label>
+                <label class="param-row">
+                    <input type="checkbox" id="sketchupSwitch">
+                    <span>SketchUp block</span>
+                </label>
+            </div>
+        </div>
+
+        <!-- Building functions -->
+        <div class="param-section" data-global="building">
+            <div class="param-section-title param-accordion" data-fold-key="building" aria-expanded="false">
+                <span>Building functions</span><span class="chevron">▶</span>
+            </div>
+            <div class="param-fold">
+                <div class="param-scroll">
+                    <div id="buildingLegendItems" style="display: flex; flex-direction: column; gap: 3px; font-size: 11px;">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <div style="width: 13px; height: 13px; background: rgb(255, 200, 150); border: 1px solid rgba(255,255,255,0.3); flex-shrink: 0;"></div>
+                            <span>Residential</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <div style="width: 13px; height: 13px; background: rgb(255, 150, 150); border: 1px solid rgba(255,255,255,0.3); flex-shrink: 0;"></div>
+                            <span>Commercial/Retail</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <div style="width: 13px; height: 13px; background: rgb(150, 200, 255); border: 1px solid rgba(255,255,255,0.3); flex-shrink: 0;"></div>
+                            <span>Office</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <div style="width: 13px; height: 13px; background: rgb(200, 200, 200); border: 1px solid rgba(255,255,255,0.3); flex-shrink: 0;"></div>
+                            <span>Industrial</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <div style="width: 13px; height: 13px; background: rgb(255, 255, 150); border: 1px solid rgba(255,255,255,0.3); flex-shrink: 0;"></div>
+                            <span>Educational</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <div style="width: 13px; height: 13px; background: rgb(255, 100, 100); border: 1px solid rgba(255,255,255,0.3); flex-shrink: 0;"></div>
+                            <span>Healthcare</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <div style="width: 13px; height: 13px; background: rgb(200, 150, 255); border: 1px solid rgba(255,255,255,0.3); flex-shrink: 0;"></div>
+                            <span>Hotels</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <div style="width: 13px; height: 13px; background: rgb(255, 180, 100); border: 1px solid rgba(255,255,255,0.3); flex-shrink: 0;"></div>
+                            <span>Restaurants/Food</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <div style="width: 13px; height: 13px; background: rgb(150, 150, 150); border: 1px solid rgba(255,255,255,0.3); flex-shrink: 0;"></div>
+                            <span>Parking</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <div style="width: 13px; height: 13px; background: rgb(150, 255, 150); border: 1px solid rgba(255,255,255,0.3); flex-shrink: 0;"></div>
+                            <span>Public/Civic</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <div style="width: 13px; height: 13px; background: rgb(255, 220, 150); border: 1px solid rgba(255,255,255,0.3); flex-shrink: 0;"></div>
+                            <span>Religious</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <div style="width: 13px; height: 13px; background: rgb(180, 180, 200); border: 1px solid rgba(255,255,255,0.3); flex-shrink: 0;"></div>
+                            <span>Warehouses</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <div style="width: 13px; height: 13px; background: rgb(200, 220, 240); border: 1px solid rgba(255,255,255,0.3); flex-shrink: 0;"></div>
+                            <span>Default/Other</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Vehicle types -->
+        <div class="param-section" data-global="vehicles">
+            <div class="param-section-title param-accordion" data-fold-key="vehicles" aria-expanded="false">
+                <span>Vehicle types</span><span class="chevron">▶</span>
+            </div>
+            <div class="param-fold">
+                <div class="param-scroll">
+                    <div id="legendItems" style="display: flex; flex-direction: column; gap: 4px; font-size: 11px;">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <div style="width: 12px; height: 12px; background: #8E44AD; border-radius: 50%; border: 1px solid rgba(255,255,255,0.3);"></div>
+                            <span>Bus</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <div style="width: 12px; height: 12px; background: #FF0000; border-radius: 50%; border: 1px solid rgba(255,255,255,0.3);"></div>
+                            <span>Tram</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <div style="width: 12px; height: 12px; background: #FFFF00; border-radius: 50%; border: 1px solid rgba(255,255,255,0.3);"></div>
+                            <span>Train</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <div style="width: 12px; height: 12px; background: #00FF00; border-radius: 50%; border: 1px solid rgba(255,255,255,0.3);"></div>
+                            <span>Metro</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <div style="width: 12px; height: 12px; background: #00FFFF; border-radius: 50%; border: 1px solid rgba(255,255,255,0.3);"></div>
+                            <span>Ferry</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <div style="width: 12px; height: 12px; background: #00FF00; border-radius: 50%; border: 1px solid rgba(255,255,255,0.3);"></div>
+                            <span>Bike</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <div style="width: 12px; height: 12px; background: #FF00FF; border-radius: 50%; border: 1px solid rgba(255,255,255,0.3);"></div>
+                            <span>Pedestrian</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <div style="width: 12px; height: 12px; background: #FFA500; border-radius: 50%; border: 1px solid rgba(255,255,255,0.3);"></div>
+                            <span>Private Car</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <div style="width: 12px; height: 12px; background: #95A5A6; border-radius: 50%; border: 1px solid rgba(255,255,255,0.3);"></div>
+                            <span>Other</span>
+                        </div>
+                    </div>
+                </div>
+                <div id="vehicleCounts" style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.15); font-size: 11px; opacity: 0.7;">
+                    <div>Total: <span id="totalVehicles">0</span></div>
+                </div>
+            </div>
+        </div>
+        </div><!-- /#globalLegendsBlock -->
+    </aside>
+
+    <!-- SUMO Custom Time Slider -->
+    <div id="sumoTimeSlider">
+        <div class="slider-header">
+            <span class="slider-title">SUMO Simulation Time</span>
+            <span class="slider-time" id="sumoTimeDisplay">0s</span>
+        </div>
+        <div class="slider-container">
+            <input type="range" id="sumoTimeRange" min="0" max="1000" value="0" step="1">
+        </div>
+        <div class="slider-controls">
+            <button class="slider-btn" id="sumoPlayPauseBtn">⏸ Pause</button>
+            <button class="slider-btn" id="sumoResetBtn">⏮ Reset</button>
+            <button class="slider-btn" id="sumoSpeedBtn">1x</button>
+        </div>
+    </div>
+
+    <!--
+        ====================================================================
+        Hidden legend data carriers.
+
+        These carry the live min/max + colour ramp values that the
+        visualisation modules write at runtime. The visible copy lives in the
+        right parameter panel (see `panelled*` elements) — the page controller
+        mirrors these values across, so the floating originals must never be
+        shown (showing them duplicated the legends).
+        ====================================================================
+    -->
+    
+    <div id="sunlightLegend" class="draggable-panel" style="position: absolute; top: calc(100% - 220px); left: 10px; z-index: 1000; background: rgba(42, 42, 42, 0.92); padding: 12px; border-radius: 5px; color: white; font-family: sans-serif; font-size: 12px; min-width: 180px; box-shadow: 0 2px 8px rgba(0,0,0,0.3); display: none;">
+        <div class="panel-header">
+            <span class="panel-title">Sunlight</span>
+            <button class="panel-minimize-btn" onclick="togglePanel('sunlightLegend')">−</button>
+        </div>
+        <div class="panel-content" id="sunlightLegendContent">
+            <div style="margin-bottom: 6px; opacity: 0.85; font-size: 11px;">Ladybug Direct Sun Hours mesh</div>
+            <div style="height: 14px; border-radius: 3px; border: 1px solid rgba(255,255,255,0.25); margin-bottom: 6px; background: linear-gradient(to right, #2c2c8a, #e74c3c, #f1c40f);"></div>
+            <div style="display: flex; justify-content: space-between; font-size: 11px; opacity: 0.9; margin-bottom: 8px;">
+                <span>Fewer hours</span>
+                <span>More hours</span>
+            </div>
+            <div style="font-size: 10px; opacity: 0.75; line-height: 1.35;">Design GLB is hidden while this layer is on.</div>
+        </div>
+    </div>
+    <div id="urbanHeatLegend" class="draggable-panel" style="position: absolute; top: calc(100% - 220px); left: calc(100% - 190px - var(--right-panel-width)); z-index: 1000; background: rgba(42, 42, 42, 0.92); padding: 12px; border-radius: 5px; color: white; font-family: sans-serif; font-size: 12px; min-width: 160px; box-shadow: 0 2px 8px rgba(0,0,0,0.3); display: none;">
+        <div class="panel-header">
+            <span class="panel-title">Urban Heat</span>
+            <button class="panel-minimize-btn" onclick="togglePanel('urbanHeatLegend')">−</button>
+        </div>
+        <div class="panel-content" id="urbanHeatLegendContent">
+            <div style="margin-bottom: 8px; opacity: 0.85; font-size: 11px;">Simulation field colors</div>
+            <div id="urbanHeatLegendBar" style="height: 14px; border-radius: 3px; border: 1px solid rgba(255,255,255,0.25); margin-bottom: 6px;"></div>
+            <div style="display: flex; justify-content: space-between; font-size: 11px; opacity: 0.9; margin-bottom: 10px;">
+                <span>Cooler</span>
+                <span>Warmer</span>
+            </div>
+            <div id="urbanHeatLegendItems" style="display: flex; flex-direction: column; gap: 4px;"></div>
+        </div>
+    </div>
+    <div id="networkFlowLegend" class="draggable-panel" style="position: absolute; top: calc(100% - 360px); left: calc(100% - 210px - var(--right-panel-width)); z-index: 1000; background: rgba(42, 42, 42, 0.92); padding: 12px; border-radius: 5px; color: white; font-family: sans-serif; font-size: 12px; min-width: 180px; box-shadow: 0 2px 8px rgba(0,0,0,0.3); display: none;">
+        <div class="panel-header">
+            <span class="panel-title">Network Flow</span>
+            <button class="panel-minimize-btn" onclick="togglePanel('networkFlowLegend')">−</button>
+        </div>
+        <div class="panel-content" id="networkFlowLegendContent">
+            <div style="margin-bottom: 8px; opacity: 0.85; font-size: 11px;">PedMac link volume (click a link)</div>
+            <div id="networkFlowLegendBar" style="height: 14px; border-radius: 3px; border: 1px solid rgba(255,255,255,0.25); margin-bottom: 6px;"></div>
+            <div id="networkFlowLegendRange" style="font-size: 11px; opacity: 0.9;">0 – … ped/day</div>
+        </div>
+    </div>
+    <div id="demandHeatLegend" class="draggable-panel" style="position: absolute; top: calc(100% - 480px); left: calc(100% - 210px - var(--right-panel-width)); z-index: 1000; background: rgba(42, 42, 42, 0.92); padding: 12px; border-radius: 5px; color: white; font-family: sans-serif; font-size: 12px; min-width: 180px; box-shadow: 0 2px 8px rgba(0,0,0,0.3); display: none;">
+        <div class="panel-header">
+            <span class="panel-title">Pedestrian Demand</span>
+            <button class="panel-minimize-btn" onclick="togglePanel('demandHeatLegend')">−</button>
+        </div>
+        <div class="panel-content" id="demandHeatLegendContent">
+            <div style="margin-bottom: 8px; opacity: 0.85; font-size: 11px;">Trip generation (daily)</div>
+            <div id="demandHeatLegendBar" style="height: 14px; border-radius: 3px; border: 1px solid rgba(255,255,255,0.25); margin-bottom: 6px;"></div>
+            <div id="demandHeatLegendRange" style="font-size: 11px; opacity: 0.9;">0 – … trips/day</div>
+        </div>
+    </div>
+    
+    <script>
+        // Panel drag and minimize functionality
+        let draggedElement = null;
+        let dragOffset = { x: 0, y: 0 };
+        let activePointerId = null;
+        let panelStates = {}; // Track minimized state
+
+        /** Lock panel to left/top so right/bottom anchors cannot snap it back. */
+        function pinPanelToTopLeft(panel) {
+            const rect = panel.getBoundingClientRect();
+            panel.style.left = `${rect.left}px`;
+            panel.style.top = `${rect.top}px`;
+            panel.style.right = 'auto';
+            panel.style.bottom = 'auto';
+        }
+
+        function endPanelDrag() {
+            if (!draggedElement) return;
+            draggedElement.classList.remove('dragging');
+            draggedElement = null;
+            activePointerId = null;
+        }
+
+        // Make panels draggable (pointer events + capture so Cesium cannot steal the drag)
+        function makeDraggable(panelId) {
+            const panel = document.getElementById(panelId);
+            if (!panel) return;
+
+            const header = panel.querySelector('.panel-header');
+            if (!header) return;
+
+            if (panel.hasAttribute('data-drag-initialized')) {
+                return;
+            }
+            panel.setAttribute('data-drag-initialized', 'true');
+
+            header.addEventListener('pointerdown', (e) => {
+                if (e.button !== undefined && e.button !== 0) return;
+                if (e.target.closest('.panel-minimize-btn')) return;
+
+                pinPanelToTopLeft(panel);
+                draggedElement = panel;
+                activePointerId = e.pointerId;
+                dragOffset.x = e.clientX - panel.getBoundingClientRect().left;
+                dragOffset.y = e.clientY - panel.getBoundingClientRect().top;
+
+                panel.classList.add('dragging');
+                panel.style.zIndex = 10000;
+                try { header.setPointerCapture(e.pointerId); } catch (_) { /* ignore */ }
+
+                e.preventDefault();
+                e.stopPropagation();
+            });
+
+            header.addEventListener('pointermove', (e) => {
+                if (!draggedElement || draggedElement !== panel) return;
+                if (activePointerId !== null && e.pointerId !== activePointerId) return;
+
+                const x = e.clientX - dragOffset.x;
+                const y = e.clientY - dragOffset.y;
+                const maxX = window.innerWidth - panel.offsetWidth;
+                const maxY = window.innerHeight - panel.offsetHeight;
+                panel.style.left = `${Math.max(0, Math.min(x, maxX))}px`;
+                panel.style.top = `${Math.max(0, Math.min(y, maxY))}px`;
+                panel.style.right = 'auto';
+                panel.style.bottom = 'auto';
+                e.preventDefault();
+                e.stopPropagation();
+            });
+
+            const stop = (e) => {
+                if (activePointerId !== null && e.pointerId !== activePointerId) return;
+                if (draggedElement === panel) endPanelDrag();
+            };
+            header.addEventListener('pointerup', stop);
+            header.addEventListener('pointercancel', stop);
+        }
+
+        document.addEventListener('pointerup', endPanelDrag);
+        document.addEventListener('pointercancel', endPanelDrag);
+
+        // Toggle panel minimize/maximize
+        function togglePanel(panelId) {
+            const panel = document.getElementById(panelId);
+            if (!panel) return;
+
+            const content = panel.querySelector('.panel-content');
+            const btn = panel.querySelector('.panel-minimize-btn');
+
+            if (!content || !btn) return;
+
+            const isMinimized = panelStates[panelId] || false;
+            panelStates[panelId] = !isMinimized;
+
+            if (panelStates[panelId]) {
+                content.classList.add('minimized');
+                btn.textContent = '+';
+            } else {
+                content.classList.remove('minimized');
+                btn.textContent = '−';
+            }
+        }
+
+        // Initialize draggable for all panels when DOM is ready
+        function initializeDraggablePanels() {
+            const panels = Array.from(document.querySelectorAll('.draggable-panel'));
+            let initializedCount = 0;
+            panels.forEach(panel => {
+                if (!panel.id) {
+                    console.warn('[Panels] Draggable panel missing id — skipped');
+                    return;
+                }
+                makeDraggable(panel.id);
+                initializedCount++;
+            });
+            console.log(`[Panels] Initialized ${initializedCount}/${panels.length} draggable panels`);
+        }
+
+        window.makeDraggable = makeDraggable;
+        window.initializeDraggablePanels = initializeDraggablePanels;
+        window.togglePanel = togglePanel;
+
+        // ---- Collapsible sections in the right parameter panel ----
+        // Global legends (display mode, 3D models, building functions, vehicle
+        // types) live at the bottom of the panel and stay folded until clicked.
+        document.addEventListener('click', (e) => {
+            const header = e.target.closest('#paramPanel .param-accordion');
+            if (!header) return;
+            const fold = header.parentElement?.querySelector('.param-fold');
+            if (!fold) return;
+            const isOpen = fold.classList.toggle('open');
+            header.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+            // Remember across reloads
+            const key = header.dataset.foldKey;
+            if (key) {
+                try { sessionStorage.setItem(`pedmodel.panelFold.${key}`, isOpen ? '1' : '0'); } catch (_) { /* ignore */ }
+            }
+        });
+
+        /** Restore folded state saved from a previous session. */
+        function restorePanelFolds() {
+            document.querySelectorAll('#paramPanel .param-accordion').forEach((header) => {
+                const key = header.dataset.foldKey;
+                if (!key) return;
+                let open = false;
+                try { open = sessionStorage.getItem(`pedmodel.panelFold.${key}`) === '1'; } catch (_) { /* ignore */ }
+                const fold = header.parentElement?.querySelector('.param-fold');
+                if (!fold) return;
+                fold.classList.toggle('open', open);
+                header.setAttribute('aria-expanded', open ? 'true' : 'false');
+            });
+        }
+        window.restorePanelFolds = restorePanelFolds;
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', () => {
+                setTimeout(initializeDraggablePanels, 100);
+                setTimeout(restorePanelFolds, 120);
+            });
+        } else {
+            setTimeout(initializeDraggablePanels, 100);
+            setTimeout(restorePanelFolds, 120);
+        }
+    </script>
+    <script type="module" src="main.js"></script>
+</body>
+</html>
+

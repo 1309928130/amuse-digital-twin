@@ -454,21 +454,19 @@ function getActiveStudyIdOrDefault() {
  * The snapshot path for one page under one proposal, or `null` when there is
  * no picture to show.
  *
- * A proposal with no data has no captures, so it returns `null` and the card
- * falls back to an empty, labelled slot.
- *
- * Note this is independent of whether the page has *data*. A placeholder page
- * still has a distinct camera framing worth previewing — that preview is what
- * tells a visitor what the page looks like and prompts them to open it — so
- * placeholders keep their snapshot and carry a "No data yet" badge alongside
- * it. Suppressing the image as well made those cards indistinguishable from
- * genuinely missing ones.
+ * Returns `null` for a page with no exported results. Such a page has no
+ * indicators to read, so its capture would only show a blank scene, and a card
+ * carrying that image reads as if there were something to see. Showing an
+ * empty, labelled slot instead keeps it honest, and keeps the four data-less
+ * pages (micro-mobility, noise, visibility, visual quality) looking the same
+ * under every proposal rather than only under the ones with no results at all.
  *
  * @param {PageDef} page
  * @param {string} studyId
  * @returns {string|null}
  */
 function thumbnailFor(page, studyId) {
+    if (lineHasPlaceholder(page)) return null;
     return `./cases/thumbs/${studyId}/${page.id}.png`;
 }
 

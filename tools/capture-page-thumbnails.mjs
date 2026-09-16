@@ -59,17 +59,21 @@ const OUT_DIR = path.join(APP_ROOT, 'cases/thumbs', STUDY);
 const CDP_HOST = arg('cdp-host', '127.0.0.1');
 const CDP_PORT = Number(arg('cdp-port', '9222'));
 
-/** Pages to capture, in the order they appear on the case-studies page. */
+/**
+ * Pages to capture, in the order they appear on the case-studies page.
+ *
+ * Only pages that carry exported results. A page with a placeholder shows an
+ * empty slot on the case-studies grid rather than a snapshot — capturing it
+ * would only produce an image of a blank scene, which the grid never reads —
+ * so micro-mobility, noise, visibility and visual quality are deliberately
+ * absent. Add a page here once its assessment is exported.
+ */
 const PAGE_IDS = [
     'flow-macro',
-    'flow-micro',
     'sunlight',
     'wind',
-    'noise',
     'pollution',
     'heat',
-    'visibility',
-    'visual-quality',
     'overlap',
 ];
 

@@ -45,6 +45,23 @@ const METRES_PER_SPEED = 3;
 const MIN_ARROW_METRES = 3;
 
 /**
+ * Arrowhead dimensions, in metres.
+ *
+ * Each probe draws a shaft plus two barbs swept back from the tip. Without them
+ * the field is a set of bare line segments, which read as short coloured dashes
+ * rather than arrows — the direction is technically encoded in the orientation
+ * but is not legible at a glance, especially at the site framing where a 9 m
+ * shaft is only a few pixels long.
+ *
+ * Sized against the shortest shaft: a 3 m/s probe draws a 9 m shaft, so 5 m
+ * barbs sit well inside it and do not overshoot neighbouring probes. The 40 deg
+ * half-angle is the usual convention for a readable arrowhead — narrower starts
+ * to look like a spike, wider like a chevron.
+ */
+const ARROW_HEAD_METRES = 5;
+const ARROW_HEAD_ANGLE_DEG = 40;
+
+/**
  * Height above the ground added to every arrow, in metres.
  *
  * The probe grid samples at z = 2 m, which is below the imported building
@@ -207,6 +224,8 @@ export async function showWindField(options = {}) {
         // Metres -> degrees at this latitude. Longitude degrees are shorter
         // than latitude degrees away from the equator, hence the cos() term.
         const latRad = (probe.latitude * Math.PI) / 180;
+        const degPerMetreLon = 1 / (111320 * Math.cos(latRad));
+        const degPerMetreLat = 1 / 111320;
         const dLon = (eastPerMetre * length) / (111320 * Math.cos(latRad));
         const dLat = (northPerMetre * length) / 111320;
 
@@ -214,14 +233,12 @@ export async function showWindField(options = {}) {
         // imported massing and would be hidden behind it. Lift the arrows to a
         // consistent reading height so they float over the blocks.
         const drawHeight = probe.height + ARROW_HEIGHT_LIFT;
+        const tipLon = probe.longitude + dLon;
+        const tipLat = probe.latitude + dLat;
 
         const positions = [
             Cesium.Cartesian3.fromDegrees(probe.longitude, probe.latitude, drawHeight),
-            Cesium.Cartesian3.fromDegrees(
-                probe.longitude + dLon,
-                probe.latitude + dLat,
-                drawHeight
-            ),
+            Cesium.Cartesian3.fromDegrees(tipLon, tipLat, drawHeight),
         ];
 
         collection.add({
@@ -229,6 +246,32 @@ export async function showWindField(options = {}) {
             width: 3,
             material: Cesium.Material.fromType('Color', { color }),
         });
+
+        // Two barbs swept back from the tip turn the shaft into an arrowhead.
+        // Rotating the unit heading by +/- the half-angle gives their
+        // directions, and they are drawn at a fixed length rather than scaled
+        // with speed so that slow probes keep a legible head.
+        for (const sign of [1, -1]) {
+            const theta = (sign * ARROW_HEAD_ANGLE_DEG * Math.PI) / 180;
+            const cos = Math.cos(theta);
+            const sin = Math.sin(theta);
+            // Rotate (east, north) by theta about the heading.
+            const bx = eastPerMetre * cos - northPerMetre * sin;
+            const by = eastPerMetre * sin + northPerMetre * cos;
+
+            collection.add({
+                positions: [
+                    Cesium.Cartesian3.fromDegrees(tipLon, tipLat, drawHeight),
+                    Cesium.Cartesian3.fromDegrees(
+                        tipLon - bx * ARROW_HEAD_METRES * degPerMetreLon,
+                        tipLat - by * ARROW_HEAD_METRES * degPerMetreLat,
+                        drawHeight
+                    ),
+                ],
+                width: 3,
+                material: Cesium.Material.fromType('Color', { color }),
+            });
+        }
     }
 
     viewer.scene.primitives.add(collection);

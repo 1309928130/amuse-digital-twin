@@ -722,6 +722,11 @@ export async function initializePages(navEl) {
                 });
             }
         },
+        onOpenPage: (pageId) => {
+            // Jump straight from a proposal card into that assessment. The
+            // camera preset does the framing, so no extra state is needed.
+            gotoPage(pageId).catch((err) => console.warn('[Cases] Could not open page:', err));
+        },
     });
     if (startStudy) setActiveStudy(startStudy);
 

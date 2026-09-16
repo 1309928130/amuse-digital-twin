@@ -117,6 +117,7 @@ export function resolveStudy(requestedId) {
  * @property {boolean} [keepCamera] Leave the camera exactly where it is (no transition)
  * @property {DocPage} [doc]      Render a document instead of the 3D scene
  * @property {boolean} [cases]    Show the proposal picker instead of the 3D scene
+ * @property {string} [thumbnail] Snapshot shown as a card on the case-studies page
  * @property {Object} layers      Layer toggles applied on page enter
  * @property {'hover'|'click'} linkTooltip
  * @property {string[]} sections  Parameter-panel sections to show
@@ -372,6 +373,54 @@ register({
  */
 export function getPage(id) {
     return PAGES.find((p) => p.id === id);
+}
+
+/**
+ * Pages offered as snapshot buttons on the case-studies page.
+ *
+ * Excludes the reading/synthesis pages (framework, case studies itself), which
+ * are not assessments of a proposal, and is ordered the way the nav groups
+ * them so the grid reads the same way as the top bar.
+ *
+ * `thumbnail` points at a snapshot captured from the running app by
+ * `tools/capture-page-thumbnails.mjs`; the files live in `cases/thumbs/`.
+ */
+const CASE_STUDY_PAGE_IDS = [
+    'flow-macro',
+    'flow-micro',
+    'sunlight',
+    'wind',
+    'noise',
+    'pollution',
+    'heat',
+    'visibility',
+    'overlap',
+];
+
+/**
+ * Assessment pages a visitor can jump into from a proposal, each with the
+ * snapshot and caption the card needs.
+ *
+ * @returns {Array<{id: string, label: string, title: string, group: string, thumbnail: string, placeholder: boolean}>}
+ */
+export function getCaseStudyPages() {
+    return CASE_STUDY_PAGE_IDS.map((id) => getPage(id))
+        .filter(Boolean)
+        .map((page) => ({
+            id: page.id,
+            label: page.label,
+            title: page.title,
+            group: page.group,
+            thumbnail: page.thumbnail || `./cases/thumbs/${page.id}.png`,
+            // Pages with no exported results still appear, but are labelled so
+            // the blank view is not mistaken for a failed load.
+            placeholder: lineHasPlaceholder(page),
+        }));
+}
+
+/** True when a page carries a "not exported yet" note. */
+function lineHasPlaceholder(page) {
+    return typeof page.placeholder === 'string' && page.placeholder.length > 0;
 }
 
 export const DEFAULT_PAGE_ID = 'flow-macro';

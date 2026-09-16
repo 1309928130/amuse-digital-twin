@@ -869,6 +869,121 @@
             color: #a9b0ba;
         }
 
+        /* ---- Drill-down: quality pages as snapshot cards ---- */
+        .cases-drill {
+            flex: 0 0 auto;
+            margin-top: 26px;
+            padding-top: 22px;
+            border-top: 1px solid rgba(255, 255, 255, 0.14);
+        }
+        .cases-drill[hidden] {
+            display: none;
+        }
+        .cases-drill-head {
+            margin-bottom: 14px;
+            /* Brief highlight so the newly revealed section is noticed after
+               the click, rather than appearing below the fold unnoticed. */
+            animation: drill-reveal 0.45s ease;
+        }
+        @keyframes drill-reveal {
+            from { opacity: 0; transform: translateY(-6px); }
+            to { opacity: 1; transform: none; }
+        }
+        .cases-drill-head h3 {
+            margin: 0 0 4px;
+            font-size: 15px;
+            font-weight: 600;
+            color: #e8eaed;
+        }
+        .cases-drill-head h3 span {
+            color: #8fc7ff;
+        }
+        .cases-drill-head p {
+            margin: 0;
+            font-size: 12.5px;
+            color: #a9b0ba;
+        }
+
+        .cases-pages {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+            gap: 12px;
+        }
+
+        .page-card {
+            display: flex;
+            flex-direction: column;
+            padding: 0;
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            border-radius: 7px;
+            background: #1c1f24;
+            color: inherit;
+            font: inherit;
+            text-align: left;
+            cursor: pointer;
+            overflow: hidden;
+            transition: border-color 0.16s ease, transform 0.16s ease;
+        }
+        .page-card:hover {
+            border-color: rgba(143, 199, 255, 0.7);
+            transform: translateY(-2px);
+        }
+        .page-card:focus-visible {
+            outline: 2px solid #8fc7ff;
+            outline-offset: 2px;
+        }
+
+        .page-thumb {
+            position: relative;
+            aspect-ratio: 16 / 10;
+            background: #0f1114;
+            overflow: hidden;
+        }
+        .page-thumb img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+        /* Placeholder shown when a snapshot has not been captured yet. */
+        .page-thumb.is-missing::after {
+            content: 'Snapshot pending';
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            color: #6b7280;
+        }
+
+        .page-badge {
+            position: absolute;
+            top: 7px;
+            left: 7px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 9.5px;
+            font-weight: 600;
+            letter-spacing: 0.3px;
+            text-transform: uppercase;
+            background: rgba(255, 255, 255, 0.16);
+            color: #cfd4db;
+        }
+
+        .page-meta {
+            padding: 8px 10px 10px;
+        }
+        .page-name {
+            font-size: 12.5px;
+            font-weight: 600;
+        }
+        .page-hint {
+            font-size: 10.5px;
+            color: #8b9199;
+            margin-top: 1px;
+        }
+
     </style>
 </head>
 <body>
@@ -921,6 +1036,19 @@
         </div>
 
         <div class="cases-grid" id="casesGrid" role="group" aria-label="Select a design proposal"></div>
+
+        <!--
+            Drill-down: revealed once a proposal is chosen. The quality pages
+            are shown as snapshot cards so the way in is obvious, rather than
+            leaving a selected proposal with nothing to do next.
+        -->
+        <div class="cases-drill" id="casesDrill" hidden>
+            <div class="cases-drill-head">
+                <h3>Explore <span id="casesDrillName">this proposal</span></h3>
+                <p>Open any assessment to see how this proposal performs.</p>
+            </div>
+            <div class="cases-pages" id="casesPages" role="group" aria-label="Open an assessment page"></div>
+        </div>
 
         <div class="cases-foot" id="casesFoot"></div>
     </section>
@@ -1108,8 +1236,8 @@
                 <span class="case-active-name" id="caseStudyActive">Proposal 1</span>
             </div>
             <div class="param-help">
-                Choose a proposal on the cards in the main view. Every assessment page then
-                reads that study's datasets.
+                Pick a proposal, then open any assessment from the cards to see how it performs
+                on that criterion.
                 <br><br>
                 Only Proposal 1 has results so far; the other two are placeholders until their
                 assessments are run.

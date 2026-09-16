@@ -13,13 +13,16 @@
  * under another proposal's name.
  */
 
-import { PROPOSALS, DEFAULT_PROPOSAL_ID, resolveStudy } from './pageConfig.js';
+import { PROPOSALS, DEFAULT_PROPOSAL_ID, resolveStudy, getCaseStudyPages } from './pageConfig.js';
 
 /** Currently requested study id (may name a proposal with no data). */
 let requestedId = DEFAULT_PROPOSAL_ID;
 
 /** Callback invoked with the resolved study whenever the selection changes. */
 let onStudyChange = null;
+
+/** Callback invoked when a quality-page card is clicked. */
+let onOpenPage = null;
 
 /**
  * Build one proposal card.
@@ -65,6 +68,81 @@ function buildCard(proposal) {
     meta.append(name, note);
     card.append(thumb, meta);
     return card;
+}
+
+/**
+ * Build one quality-page card.
+ *
+ * A real `<button>` for keyboard and screen-reader support, with the snapshot
+ * as the main affordance so the card reads as "go here" rather than as a label.
+ *
+ * @param {ReturnType<typeof getCaseStudyPages>[number]} page
+ * @returns {HTMLButtonElement}
+ */
+function buildPageCard(page) {
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = 'page-card';
+    card.dataset.pageId = page.id;
+
+    const thumb = document.createElement('div');
+    thumb.className = 'page-thumb';
+
+    const img = document.createElement('img');
+    img.src = page.thumbnail;
+    img.alt = `${page.label} — snapshot of the assessment view`;
+    // Eager: these are the point of the page, and lazy loading inside a
+    // scrollable overlay can leave them blank until the user scrolls.
+    img.loading = 'eager';
+    // A missing snapshot should not leave a broken-image icon in the grid.
+    img.addEventListener('error', () => {
+        thumb.classList.add('is-missing');
+        img.remove();
+    });
+    thumb.appendChild(img);
+
+    if (page.placeholder) {
+        const badge = document.createElement('span');
+        badge.className = 'page-badge is-empty';
+        badge.textContent = 'No data yet';
+        thumb.appendChild(badge);
+    }
+
+    const meta = document.createElement('div');
+    meta.className = 'page-meta';
+
+    const name = document.createElement('div');
+    name.className = 'page-name';
+    name.textContent = page.label;
+
+    const hint = document.createElement('div');
+    hint.className = 'page-hint';
+    hint.textContent = page.group;
+
+    meta.append(name, hint);
+    card.append(thumb, meta);
+    return card;
+}
+
+/**
+ * Build the drill-down grid of quality pages.
+ *
+ * Built once: the set of assessment pages is fixed, and only the selected
+ * proposal changes, which `render()` handles.
+ */
+function buildPageGrid() {
+    const grid = document.getElementById('casesPages');
+    if (!grid || grid.dataset.wired) return;
+
+    getCaseStudyPages().forEach((page) => grid.appendChild(buildPageCard(page)));
+
+    grid.addEventListener('click', (event) => {
+        const card = event.target.closest('.page-card');
+        if (!card || !onOpenPage) return;
+        onOpenPage(card.dataset.pageId);
+    });
+
+    grid.dataset.wired = 'true';
 }
 
 /**
@@ -117,19 +195,34 @@ function render() {
         activeLabel.dataset.substituted = String(study.substituted);
     }
 
+    // Reveal the drill-down only once a proposal is chosen, and name that
+    // proposal in the heading so it is clear which study's pages are listed.
+    const drill = document.getElementById('casesDrill');
+    if (drill) {
+        drill.hidden = !study.requested;
+        const drillLabel = document.getElementById('casesDrillName');
+        if (drillLabel) {
+            drillLabel.textContent = proposal ? proposal.label : study.requested;
+        }
+    }
+
     if (onStudyChange) onStudyChange(study);
 }
 
 /**
  * Initialise the picker.
  *
- * Idempotent: the grid is only built once, so repeated page visits do not
+ * Idempotent: the grids are only built once, so repeated page visits do not
  * duplicate cards or re-register listeners.
  *
- * @param {{ onStudyChange?: (study: {requested: string, effective: string, substituted: boolean}) => void }} [options]
+ * @param {{
+ *   onStudyChange?: (study: {requested: string, effective: string, substituted: boolean}) => void,
+ *   onOpenPage?: (pageId: string) => void
+ * }} [options]
  */
 export function initializeCaseStudies(options = {}) {
     onStudyChange = options.onStudyChange || null;
+    onOpenPage = options.onOpenPage || null;
 
     const grid = document.getElementById('casesGrid');
     if (!grid) return;
@@ -147,6 +240,7 @@ export function initializeCaseStudies(options = {}) {
         grid.dataset.wired = 'true';
     }
 
+    buildPageGrid();
     render();
 }
 

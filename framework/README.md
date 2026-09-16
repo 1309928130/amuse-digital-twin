@@ -8,7 +8,7 @@
 
 This project presents an workflow, or assessment framework, **AMUSE**, for **A**ssessing **M**ultisensory **US**er **E**xperience.
 
-**Live viewer: <https://digital-twin-zuidas.web.app/>** · **Source: <https://github.com/1309928130/amuse-digital-twin>**
+**Live viewer: <https://multisensory-digital-twin.web.app/>** · **Source: <https://github.com/1309928130/amuse-digital-twin>**
 
 
 
@@ -490,7 +490,7 @@ For visual quality assessment:
 
 AMUSE outputs are brought together in a Cesium-based 3D viewer under [`visualization/`](../../visualization/). The viewer overlays PedMac macroscopic results with environmental layers (urban heat, wind) and transit / SUMO content on the same Zuidas scene, so design alternatives can be compared spatially.
 
-**Live viewer: <https://digital-twin-zuidas.web.app/>** — a hosted build of this viewer. Source: <https://github.com/1309928130/amuse-digital-twin>.
+**Live viewer: <https://multisensory-digital-twin.web.app/>** — a hosted build of this viewer. Source: <https://github.com/1309928130/amuse-digital-twin>.
 
 ### PedMac layers in the viewer
 
@@ -530,7 +530,7 @@ Optional flags: `--flows path/to/edge_flows.parquet`, `--min-flow`, `--pad` (deg
 
 ### Running the viewer
 
-The hosted build is at **<https://digital-twin-zuidas.web.app/>**.
+The hosted build is at **<https://multisensory-digital-twin.web.app/>**.
 
 To run it locally:
 

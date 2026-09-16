@@ -48,24 +48,73 @@ const DEFAULT_CASE =
 /**
  * Affine transform from projected metres to WGS84.
  *
- * Fitted against `simulation_results_heat_wgs84.csv` — the same case area,
- * already projected by a known-good pipeline. A least-squares fit over all
- * 18,471 rows gives sub-2 m residuals, and the implied scales (68,131 m/deg
- * lon, 111,303 m/deg lat) match the real values at this latitude, which is the
- * sanity check that the fit is meaningful rather than coincidental.
+ * Fitted by least squares against `simulation_results_heat_wgs84.csv` — the
+ * same case area, already projected by a known-good pipeline. The fit uses all
+ * 18,471 rows and reproduces the trusted CSV to **1.1 cm maximum error**, which
+ * is well inside the precision of the data itself.
+ *
+ * ## Why there are cross terms
+ *
+ * The projected grid is not axis-aligned with true north: it carries a
+ * +0.411 deg rotation, the meridian convergence of the projection. Recovering
+ * the implied metre-space Jacobian gives
+ *
+ *     east  = +0.997959*dx - 0.007162*dy
+ *     north = +0.007182*dx + 1.000469*dy
+ *
+ * — the same rotation in both rows, which is the check that this is a real
+ * convergence and not a fitting artefact.
+ *
+ * Dropping the cross terms (as an earlier version of this script did, treating
+ * lon as a function of x alone and lat of y alone) leaves a systematic ~1.3 m
+ * mean and 2.4 m worst-case error, peaking at the grid corners. Those terms are
+ * the `*y` coefficient on longitude and the `*x` coefficient on latitude below.
+ *
+ * ## Note on the CFD case area
+ *
+ * The probe grid is additionally shifted by `CASE_OFFSET` before projection.
+ * The OpenFOAM case was built on its own origin and its grid sits 73.5 m
+ * southeast of the footprint the other simulations use; see `CASE_OFFSET` for
+ * how that was measured. Without it the wind and pollution layers draw ~74 m
+ * away from the same buildings the sunlight and heat layers sit on.
  *
  * Regenerate with the one-off analysis in the script header if the case area
  * ever moves; hardcoding avoids re-reading a 1.9 MB CSV on every build.
  */
 const AFFINE = {
-    lon: { a: 3.112367039424, b: 1.467756269859e-5 },
-    lat: { a: 47.994280760099, b: 8.984481911632e-6 },
+    lon: { a: 3.16395201669929, bx: 1.46717699176902e-5, by: -1.05300033141821e-7 },
+    lat: { a: 47.98519451501437, bx: 6.45132710297329e-8, by: 8.98732554750328e-6 },
 };
 
+/**
+ * Rigid offset applied to the CFD probe grid before projection, in metres.
+ *
+ * The OpenFOAM case was built on its own origin, and its probe grid lands
+ * 73.5 m southeast of the footprint every other simulation uses, while being
+ * the same size and orientation (414x483 m vs the heat grid's 417x492 m). So
+ * the results are right but drawn over the wrong patch of the city.
+ *
+ * Verified by translating the CFD metre box by this amount and re-projecting:
+ * all four corners then land within a few metres of the heat grid's corners,
+ * confirming the two grids describe the same physical area with a pure
+ * translation and no relative rotation.
+ *
+ * These are the numbers that centre-align the two grids:
+ *
+ *     dx = heat_centre_x - cfd_centre_x = -58.3 m
+ *     dy = heat_centre_y - cfd_centre_y = +44.8 m
+ *
+ * If the case is ever rebuilt, re-derive this by comparing the CFD probe
+ * bounding box against the heat grid box rather than eyeballing the viewer.
+ */
+const CASE_OFFSET = { x: -58.3, y: 44.8 };
+
 function toLonLat(x, y) {
+    const gx = x + CASE_OFFSET.x;
+    const gy = y + CASE_OFFSET.y;
     return {
-        longitude: AFFINE.lon.a + x * AFFINE.lon.b,
-        latitude: AFFINE.lat.a + y * AFFINE.lat.b,
+        longitude: AFFINE.lon.a + gx * AFFINE.lon.bx + gy * AFFINE.lon.by,
+        latitude: AFFINE.lat.a + gx * AFFINE.lat.bx + gy * AFFINE.lat.by,
     };
 }
 

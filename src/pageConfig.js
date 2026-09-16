@@ -321,6 +321,23 @@ register({
 });
 
 register({
+    id: 'visual-quality',
+    label: 'Visual quality',
+    title: 'Visual quality (street level)',
+    group: 'Perception',
+    // Deliberately the station-square framing used by micro-mobility rather
+    // than the site-block view the other quality pages share: this assessment
+    // is read at eye level, where the visual-quality indicators are defined,
+    // and the wider site framing puts the camera too far away to judge them.
+    camera: { ...STATION_SQUARE_VIEWPOINT },
+    layers: { sunlight: false, urbanHeat: false, networkFlow: false, wind: false },
+    linkTooltip: 'click',
+    sections: ['layers', 'legend-visual-quality', 'placeholder-method'],
+    placeholder:
+        'Street-level visual-quality assessment (Rhino + Python view analysis) is not exported to the web viewer yet.',
+});
+
+register({
     id: 'overlap',
     label: 'Multi-layer overlap',
     title: 'Multi-layer overlapping analysis',
@@ -394,6 +411,7 @@ const CASE_STUDY_PAGE_IDS = [
     'pollution',
     'heat',
     'visibility',
+    'visual-quality',
     'overlap',
 ];
 
@@ -436,16 +454,21 @@ function getActiveStudyIdOrDefault() {
  * The snapshot path for one page under one proposal, or `null` when there is
  * no picture to show.
  *
- * A proposal with no data has no captures, and a page that itself has no
- * exported results would only ever capture a blank view, so both cases return
- * `null` and the card falls back to an empty, labelled slot.
+ * A proposal with no data has no captures, so it returns `null` and the card
+ * falls back to an empty, labelled slot.
+ *
+ * Note this is independent of whether the page has *data*. A placeholder page
+ * still has a distinct camera framing worth previewing — that preview is what
+ * tells a visitor what the page looks like and prompts them to open it — so
+ * placeholders keep their snapshot and carry a "No data yet" badge alongside
+ * it. Suppressing the image as well made those cards indistinguishable from
+ * genuinely missing ones.
  *
  * @param {PageDef} page
  * @param {string} studyId
  * @returns {string|null}
  */
 function thumbnailFor(page, studyId) {
-    if (lineHasPlaceholder(page)) return null;
     return `./cases/thumbs/${studyId}/${page.id}.png`;
 }
 

@@ -69,6 +69,7 @@ const PAGE_IDS = [
     'pollution',
     'heat',
     'visibility',
+    'visual-quality',
     'overlap',
 ];
 

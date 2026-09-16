@@ -324,8 +324,10 @@ register({
     label: 'Multi-layer overlap',
     title: 'Multi-layer overlapping analysis',
     group: 'Synthesis',
-    // Same overview framing as the flow page, tilted to read the overlay
-    camera: { ...OVERVIEW_VIEWPOINT, pitchDeg: -65 },
+    // Same site-block framing as every quality page, so switching into the
+    // overlay holds the camera steady and the layers land on the same view the
+    // individual assessments used.
+    camera: { ...SITE_BLOCK_VIEWPOINT },
     layers: { networkFlow: true, pedDemand: false, urbanHeat: true, sunlight: false, wind: false },
     // In the synthesis view links are read-only: click to inspect, never hover.
     linkTooltip: 'click',

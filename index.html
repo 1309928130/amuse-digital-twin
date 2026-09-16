@@ -957,6 +957,29 @@
             color: #6b7280;
         }
 
+        /* A proposal with no results at all: the slot is empty by design, so it
+           reads as a dashed-outline placeholder rather than a failed load. */
+        .page-card.is-empty {
+            border-style: dashed;
+            border-color: rgba(255, 255, 255, 0.12);
+        }
+        .page-card.is-empty .page-thumb {
+            background: repeating-linear-gradient(
+                45deg,
+                #131519,
+                #131519 8px,
+                #16191e 8px,
+                #16191e 16px
+            );
+        }
+        .page-card.is-empty .page-thumb.is-missing::after {
+            content: 'Not run yet';
+            color: #555b66;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            font-size: 10px;
+        }
+
         .page-badge {
             position: absolute;
             top: 7px;

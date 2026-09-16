@@ -17,7 +17,7 @@
     "sync-docs": "node tools/sync-framework-doc.mjs",
     "check-docs": "node tools/sync-framework-doc.mjs --check",
     "build-deploy": "node tools/build-firebase-deploy.mjs",
-    "capture-thumbs": "node tools/capture-page-thumbnails.mjs",
+    "capture-thumbs": "node tools/capture-page-thumbnails.mjs --study proposal-1",
     "deploy": "node tools/sync-framework-doc.mjs && node tools/build-firebase-deploy.mjs && npx firebase deploy --only hosting"
   },
   "keywords": [

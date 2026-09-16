@@ -8,13 +8,19 @@
  * stale and advertise a layout that no longer exists.
  *
  * This drives a real browser over the DevTools Protocol, waits for each page's
- * layers to settle, and writes a PNG per assessment to `cases/thumbs/`.
+ * layers to settle, and writes a PNG per assessment to
+ * `cases/thumbs/<study>/`.
  *
- *   node tools/capture-page-thumbnails.mjs [--port 8080] [--width 1280] [--height 800]
+ *   node tools/capture-page-thumbnails.mjs [--port 8080] [--width 1280] [--height 800] [--study proposal-1]
+ *
+ * Only pages that actually have data for the chosen study are captured, so a
+ * proposal with no results writes nothing and its cards stay empty rather than
+ * advertising another proposal's snapshots. Run it once per proposal as each
+ * set of results lands.
  *
  * The viewer must already be running (`npm start`). Captures go to
- * `cases/thumbs/<page-id>.png`, which is exactly where `getCaseStudyPages()`
- * in `src/pageConfig.js` expects them.
+ * `cases/thumbs/<study>/<page-id>.png`, which is where `getCaseStudyPages()` in
+ * `src/pageConfig.js` looks for them.
  *
  * ## Why a browser and not a headless renderer
  *
@@ -38,7 +44,6 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(HERE, '..');
-const OUT_DIR = path.join(APP_ROOT, 'cases/thumbs');
 
 function arg(name, fallback) {
     const i = process.argv.indexOf(`--${name}`);
@@ -48,6 +53,9 @@ function arg(name, fallback) {
 const PORT = Number(arg('port', '8080'));
 const WIDTH = Number(arg('width', '1280'));
 const HEIGHT = Number(arg('height', '800'));
+/** Proposal folder to write into; must match a PROPOSALS id in pageConfig.js. */
+const STUDY = arg('study', 'proposal-1');
+const OUT_DIR = path.join(APP_ROOT, 'cases/thumbs', STUDY);
 const CDP_HOST = arg('cdp-host', '127.0.0.1');
 const CDP_PORT = Number(arg('cdp-port', '9222'));
 
@@ -144,7 +152,8 @@ async function main() {
 
     const base = `http://localhost:${PORT}/`;
     console.log(`[thumbs] Viewer: ${base}`);
-    console.log(`[thumbs] Output:  ${path.relative(APP_ROOT, OUT_DIR)}/`);
+    console.log(`[thumbs] Study:  ${STUDY}`);
+    console.log(`[thumbs] Output: ${path.relative(APP_ROOT, OUT_DIR)}/`);
 
     const cdp = await connect();
 
@@ -175,6 +184,22 @@ async function main() {
         if (i === 59) throw new Error('Viewer did not finish initialising.');
     }
     console.log('[thumbs] Viewer ready.');
+
+    // Put the picker on the requested proposal. Its snapshots are the ones
+    // being captured; capturing under another proposal's selection would label
+    // the images with the wrong study.
+    const studyReady = await cdp.eval(`(() => {
+        const state = document.getElementById('caseStudyState');
+        return !!(state && (state.dataset.effective === ${JSON.stringify(STUDY)}));
+    })()`);
+    if (!studyReady) {
+        console.warn(
+            `[thumbs] Study "${STUDY}" is not the active study in this run, so the captured ` +
+            'pages would not match. Serving one study at a time, this is expected for any ' +
+            'proposal without data — nothing will be written.'
+        );
+        return;
+    }
 
     // Hide the app chrome so the snapshot shows the scene and its data, not the
     // surrounding UI. This is presentation for the card, not a state change.

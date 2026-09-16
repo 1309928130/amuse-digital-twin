@@ -14,9 +14,11 @@
  */
 
 import { PROPOSALS, DEFAULT_PROPOSAL_ID, resolveStudy, getCaseStudyPages } from './pageConfig.js';
-
 /** Currently requested study id (may name a proposal with no data). */
 let requestedId = DEFAULT_PROPOSAL_ID;
+
+/** Proposal whose snapshots are currently in the drill-down grid. */
+let renderedStudy = null;
 
 /** Callback invoked with the resolved study whenever the selection changes. */
 let onStudyChange = null;
@@ -88,23 +90,32 @@ function buildPageCard(page) {
     const thumb = document.createElement('div');
     thumb.className = 'page-thumb';
 
-    const img = document.createElement('img');
-    img.src = page.thumbnail;
-    img.alt = `${page.label} — snapshot of the assessment view`;
-    // Eager: these are the point of the page, and lazy loading inside a
-    // scrollable overlay can leave them blank until the user scrolls.
-    img.loading = 'eager';
-    // A missing snapshot should not leave a broken-image icon in the grid.
-    img.addEventListener('error', () => {
+    if (page.thumbnail) {
+        const img = document.createElement('img');
+        img.src = page.thumbnail;
+        img.alt = `${page.label} — snapshot of the assessment view`;
+        // Eager: these are the point of the page, and lazy loading inside a
+        // scrollable overlay can leave them blank until the user scrolls.
+        img.loading = 'eager';
+        // No snapshot for this proposal: fall back to the empty slot rather
+        // than leaving a broken-image icon in the grid.
+        img.addEventListener('error', () => {
+            img.remove();
+            thumb.classList.add('is-missing');
+        });
+        thumb.appendChild(img);
+    } else {
+        // No capture exists for this proposal. The card stays — the page is
+        // still part of the workflow — but it reads as empty, not as another
+        // proposal's result.
         thumb.classList.add('is-missing');
-        img.remove();
-    });
-    thumb.appendChild(img);
+        card.classList.add('is-empty');
+    }
 
-    if (page.placeholder) {
+    if (!page.thumbnail || page.placeholder) {
         const badge = document.createElement('span');
         badge.className = 'page-badge is-empty';
-        badge.textContent = 'No data yet';
+        badge.textContent = page.thumbnail ? 'No data yet' : 'Not run yet';
         thumb.appendChild(badge);
     }
 
@@ -125,24 +136,28 @@ function buildPageCard(page) {
 }
 
 /**
- * Build the drill-down grid of quality pages.
+ * Build the drill-down grid of quality pages for one proposal.
  *
- * Built once: the set of assessment pages is fixed, and only the selected
- * proposal changes, which `render()` handles.
+ * Rebuilt on every proposal change: the snapshots are per proposal, so the
+ * grid cannot be built once and reused. The click listener lives on the grid
+ * itself, which survives the rebuild, so it is bound only once.
+ *
+ * @param {string} studyId Proposal whose snapshots to show.
  */
-function buildPageGrid() {
+function buildPageGrid(studyId) {
     const grid = document.getElementById('casesPages');
-    if (!grid || grid.dataset.wired) return;
+    if (!grid) return;
 
-    getCaseStudyPages().forEach((page) => grid.appendChild(buildPageCard(page)));
+    grid.replaceChildren(...getCaseStudyPages(studyId).map(buildPageCard));
 
-    grid.addEventListener('click', (event) => {
-        const card = event.target.closest('.page-card');
-        if (!card || !onOpenPage) return;
-        onOpenPage(card.dataset.pageId);
-    });
-
-    grid.dataset.wired = 'true';
+    if (!grid.dataset.wired) {
+        grid.addEventListener('click', (event) => {
+            const card = event.target.closest('.page-card');
+            if (!card || !onOpenPage) return;
+            onOpenPage(card.dataset.pageId);
+        });
+        grid.dataset.wired = 'true';
+    }
 }
 
 /**
@@ -164,14 +179,13 @@ function render() {
     const foot = document.getElementById('casesFoot');
     if (foot) {
         if (study.substituted) {
-            // Be explicit about the substitution: the user asked for a study
-            // with no results, and the pages are still showing another one.
-            const effective = PROPOSALS.find((p) => p.id === study.effective);
+            // Honest about what is on screen: the picker selection stands, but
+            // the assessment pages behind it have no results of their own yet.
             foot.innerHTML =
                 `<b>${proposal ? proposal.label : study.requested}</b> has no assessment data yet, ` +
-                `so the pages above still show <b>${effective ? effective.label : study.effective}</b>. ` +
-                'Add results under <code>simulation_data/' +
-                `${study.requested}/</code> and they will be picked up here.`;
+                'so the pages above are empty rather than showing another proposal’s results. ' +
+                'Run the assessments and add them under <code>simulation_data/' +
+                `${study.requested}/</code> to fill them in.`;
         } else {
             foot.innerHTML =
                 `<b>${proposal ? proposal.label : study.effective}</b> is the active study. ` +
@@ -190,8 +204,10 @@ function render() {
 
     const activeLabel = document.getElementById('caseStudyActive');
     if (activeLabel) {
-        const effective = PROPOSALS.find((p) => p.id === study.effective);
-        activeLabel.textContent = effective ? effective.label : study.effective;
+        // Name the *requested* proposal, not the effective study. The cards
+        // beside this label show that proposal's own snapshots — empty when it
+        // has no results — so echoing "Proposal 1" here would contradict them.
+        activeLabel.textContent = proposal ? proposal.label : study.requested;
         activeLabel.dataset.substituted = String(study.substituted);
     }
 
@@ -204,6 +220,14 @@ function render() {
         if (drillLabel) {
             drillLabel.textContent = proposal ? proposal.label : study.requested;
         }
+    }
+
+    // Snapshots belong to the selected proposal, so the grid is rebuilt rather
+    // than re-labelled. Keyed on the requested study, not the effective one:
+    // a proposal with no data must show empty slots, not Proposal 1's results.
+    if (study.requested !== renderedStudy) {
+        buildPageGrid(study.requested);
+        renderedStudy = study.requested;
     }
 
     if (onStudyChange) onStudyChange(study);
@@ -240,7 +264,7 @@ export function initializeCaseStudies(options = {}) {
         grid.dataset.wired = 'true';
     }
 
-    buildPageGrid();
+    renderedStudy = null;
     render();
 }
 

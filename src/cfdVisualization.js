@@ -281,13 +281,44 @@ const POLLUTION_RAMP = [
 
 /** Lift for the ground-level pollution points, in metres.
  *
- * The probes are sampled at z = 2 m, so this is only a nudge to keep the points
- * clear of z-fighting against the basemap imagery — it is deliberately small.
- * It was originally 25 m to escape depth occlusion by the building massing, but
- * `disableDepthTestDistance` handles that properly; a large lift just made the
- * whole field visibly float above the streets.
+ * The probes are sampled at z = 2 m (roughly breathing height), so this is only
+ * a nudge to keep the points clear of z-fighting against the basemap imagery.
+ * Keep it small: the field should sit *on* the street, not hover above it.
  */
-const GROUND_POINT_LIFT = 2;
+const GROUND_POINT_LIFT = 0.5;
+
+/**
+ * Distance at which a point stops drawing through geometry, in metres.
+ *
+ * `disableDepthTestDistance` is a screen-space heuristic: below this range the
+ * points ignore the depth buffer. It is deliberately large because the probes
+ * sit at street level between dense blocks — with strict depth testing most of
+ * the field is hidden behind the massing from any oblique view.
+ *
+ * Measured: dropping this to 0 changed well under 0.2% of pixels, so the depth
+ * buffer is not what made the field look like it floated. The real cause was
+ * point over-plotting (see `pointSize` / `maxProbes` in `showPollutionField`).
+ */
+const DEPTH_TEST_DISABLE_RANGE = 1e5;
+
+/**
+ * Default point size and probe budget for the pollution field.
+ *
+ * These two control whether the field reads as sampled data or as a painted
+ * sheet, and they matter more than any depth setting:
+ *
+ * - At 9 px with 12 000 probes the points overlapped into continuous fills,
+ *   covering ~35% of the frame and burying the building massing behind a flat
+ *   wash — which looked like the dots rendering *on top of* the buildings even
+ *   though they sit at 2.5 m.
+ * - At 4 px with 4 500 they cover ~9.5%, so individual points are legible and
+ *   the massing shows through, while the gradient across the site is preserved.
+ *
+ * `scaleByDistance` is correspondingly gentler: the previous 1.6x near-field
+ * magnification was the main cause of the merging.
+ */
+const POLLUTION_POINT_SIZE = 4;
+const POLLUTION_MAX_PROBES = 4500;
 
 /**
  * Render the pollutant concentration field as ground-level points.
@@ -301,7 +332,13 @@ const GROUND_POINT_LIFT = 2;
  * @returns {Promise<{count: number}|null>}
  */
 export async function showPollutionField(options = {}) {
-    const { rangeMax = null, pointSize = 9, maxProbes = 12000 } = options;
+    const {
+        rangeMax = null,
+        pointSize = POLLUTION_POINT_SIZE,
+        maxProbes = POLLUTION_MAX_PROBES,
+        depthTestRange = DEPTH_TEST_DISABLE_RANGE,
+        pointLift = GROUND_POINT_LIFT,
+    } = options;
 
     const viewer = getViewer();
     if (!viewer || viewer.isDestroyed()) return null;
@@ -328,21 +365,24 @@ export async function showPollutionField(options = {}) {
             position: Cesium.Cartesian3.fromDegrees(
                 probe.longitude,
                 probe.latitude,
-                probe.height + GROUND_POINT_LIFT
+                probe.height + pointLift
             ),
             color: rampColor(POLLUTION_RAMP, probe.s / cap),
             pixelSize: pointSize,
-            // Points must scale with distance or they vanish when zoomed out to
-            // the site block, which is the default framing for this page.
-            scaleByDistance: new Cesium.NearFarScalar(300, 1.6, 3000, 0.7),
-            // Draw through the building massing. The probes are sampled at
-            // street level, so without this they sit inside or behind the
-            // blocks and the whole field disappears from the default view.
+            // Points scale gently with distance so they stay visible when zoomed
+            // out to the site block. Keep the near-field factor close to 1: a
+            // large magnification makes neighbouring probes overlap and the
+            // field reads as a painted sheet rather than sampled data.
+            scaleByDistance: new Cesium.NearFarScalar(300, 1.15, 3000, 0.7),
+            // Large: the probes are between dense blocks at street level, so
+            // strict depth testing hides most of the field from an oblique
+            // view. See DEPTH_TEST_DISABLE_RANGE for why this is not the knob
+            // that controls the "floating dots" appearance.
             //
-            // A large finite number, not `Number.POSITIVE_INFINITY`: this
-            // Cesium build coerces Infinity to null on PointPrimitive, which
-            // silently leaves depth testing enabled.
-            disableDepthTestDistance: 1e9,
+            // A finite distance, not `Number.POSITIVE_INFINITY`: this Cesium
+            // build coerces Infinity to null on PointPrimitive, which silently
+            // leaves depth testing enabled.
+            disableDepthTestDistance: depthTestRange,
         });
     }
 

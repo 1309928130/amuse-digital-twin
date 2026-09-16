@@ -401,9 +401,17 @@ const CASE_STUDY_PAGE_IDS = [
  * Assessment pages a visitor can jump into from a proposal, each with the
  * snapshot and caption the card needs.
  *
- * @returns {Array<{id: string, label: string, title: string, group: string, thumbnail: string, placeholder: boolean}>}
+ * Snapshots are per proposal: the capture script drives the viewer once per
+ * proposal and writes to `cases/thumbs/<proposal id>/<page id>.png`. Pages
+ * that carry no exported results resolve to no snapshot at all, so the grid
+ * shows an empty slot rather than another proposal's picture — a reader must
+ * never be shown Proposal 1's sunlight under a Proposal 2 label.
+ *
+ * @param {string} [studyId] Proposal whose snapshots to resolve; defaults to
+ *   the active study.
+ * @returns {Array<{id: string, label: string, title: string, group: string, thumbnail: string|null, placeholder: boolean}>}
  */
-export function getCaseStudyPages() {
+export function getCaseStudyPages(studyId = getActiveStudyIdOrDefault()) {
     return CASE_STUDY_PAGE_IDS.map((id) => getPage(id))
         .filter(Boolean)
         .map((page) => ({
@@ -411,11 +419,34 @@ export function getCaseStudyPages() {
             label: page.label,
             title: page.title,
             group: page.group,
-            thumbnail: page.thumbnail || `./cases/thumbs/${page.id}.png`,
+            thumbnail: thumbnailFor(page, studyId),
             // Pages with no exported results still appear, but are labelled so
             // the blank view is not mistaken for a failed load.
             placeholder: lineHasPlaceholder(page),
         }));
+}
+
+/** Resolve the study to use when the caller does not name one. */
+function getActiveStudyIdOrDefault() {
+    const state = typeof document !== 'undefined' ? document.getElementById('caseStudyState') : null;
+    return state ? state.dataset.requested || DEFAULT_PROPOSAL_ID : DEFAULT_PROPOSAL_ID;
+}
+
+/**
+ * The snapshot path for one page under one proposal, or `null` when there is
+ * no picture to show.
+ *
+ * A proposal with no data has no captures, and a page that itself has no
+ * exported results would only ever capture a blank view, so both cases return
+ * `null` and the card falls back to an empty, labelled slot.
+ *
+ * @param {PageDef} page
+ * @param {string} studyId
+ * @returns {string|null}
+ */
+function thumbnailFor(page, studyId) {
+    if (lineHasPlaceholder(page)) return null;
+    return `./cases/thumbs/${studyId}/${page.id}.png`;
 }
 
 /** True when a page carries a "not exported yet" note. */

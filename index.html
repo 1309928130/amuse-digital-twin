@@ -1915,6 +1915,24 @@
         .partner-contact-link {
             font-size: 13px;
             font-weight: 500;
+            /* Coloured explicitly rather than inherited. The panel-wide rule
+               (#paramPanel a) sets a blue chosen for contrast against the dark
+               panel, but this rule previously set no colour at all, so the
+               address fell through to the browser's default link blue — a dark
+               blue that is close to invisible on the dark background, and easy
+               to miss because the text still looks correctly styled in the
+               markup. Set here so the address reads as body text with the
+               affordance carried by the underline on hover. */
+            color: #dfe3e8;
+            text-decoration: none;
+        }
+        .partner-contact-link:hover {
+            text-decoration: underline;
+        }
+        .partner-contact-link:focus-visible {
+            outline: 2px solid #8fc7ff;
+            outline-offset: 2px;
+            border-radius: 2px;
         }
         .partner-contact-note {
             font-size: 11.5px;

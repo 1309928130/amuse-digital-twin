@@ -33,18 +33,25 @@ let onOpenPage = null;
  * The proposals to show in the picker: the built-in three plus anything the
  * visitor added on the Tools page.
  *
- * Visitor-added studies have no artwork of their own, so they borrow the first
- * proposal's thumbnail. Showing a picture that is not literally theirs is a
- * compromise, but a card with a broken image would read as a bug, and the name
- * and "No data / Data available" badge are what the picker is actually for.
+ * A visitor-added proposal has no artwork of its own unless its author uploaded
+ * some, in which case `thumbnail` is that image. With none, `thumbnail` is
+ * `null` and the card renders an empty slot.
  *
- * @returns {Array<{id: string, label: string, note: string, thumbnail: string, hasData: boolean}>}
+ * It used to borrow the first proposal's picture, on the reasoning that a card
+ * with a broken image reads as a bug. That was the wrong call: the picture in
+ * this grid is a photograph of a *specific design*, so showing Proposal 1's
+ * aerial view over a card labelled "Proposal X" states something false about
+ * what the visitor is looking at. An empty slot is unmistakably "no image here"
+ * where a borrowed one is mistaken for evidence. The name and the data badge
+ * remain, so the card is still usable.
+ *
+ * @returns {Array<{id: string, label: string, note: string,
+ *   thumbnail: string|null, hasData: boolean}>}
  */
 function getCaseStudyProposals() {
     const registry = typeof window !== 'undefined' ? window.__dataRegistry : null;
     if (!registry) return PROPOSALS;
 
-    const fallbackThumb = PROPOSALS[0]?.thumbnail || './cases/proposal1.png';
     const builtInIds = new Set(PROPOSALS.map((p) => p.id));
 
     return registry.getStudyList().map((study) => {
@@ -56,7 +63,8 @@ function getCaseStudyProposals() {
             id: study.id,
             label: study.label,
             note: study.note,
-            thumbnail: fallbackThumb,
+            // The visitor's own image, or nothing. Never someone else's.
+            thumbnail: registry.getProposalImage(study.id) || null,
             hasData: registry.studyHasData(study.id),
         };
     });
@@ -80,11 +88,24 @@ function buildCard(proposal) {
     const thumb = document.createElement('div');
     thumb.className = 'case-thumb';
 
-    const img = document.createElement('img');
-    img.src = proposal.thumbnail;
-    img.alt = `${proposal.label} — aerial view of the design proposal`;
-    img.loading = 'lazy';
-    thumb.appendChild(img);
+    if (proposal.thumbnail) {
+        const img = document.createElement('img');
+        img.src = proposal.thumbnail;
+        img.alt = `${proposal.label} — view of the design proposal`;
+        img.loading = 'lazy';
+        // A stored image can be dropped by the browser (storage cleared, or a
+        // quota eviction), so a broken source falls back to the same empty slot
+        // as having no image at all rather than showing a broken-image icon.
+        img.addEventListener('error', () => {
+            img.remove();
+            thumb.classList.add('is-missing');
+        });
+        thumb.appendChild(img);
+    } else {
+        // No image for this proposal. The card still names it and still says
+        // whether it has results, which is what the picker is for.
+        thumb.classList.add('is-missing');
+    }
 
     // Say plainly which study actually has results behind it.
     const badge = document.createElement('span');
@@ -359,6 +380,36 @@ export function getRequestedStudyId() {
 export function setActiveStudy(id) {
     requestedId = id;
     render();
+}
+
+/**
+ * Select a proposal, scroll its card into view, and draw attention to it.
+ *
+ * Used by the "Show the proposal" button on the Tools page, which exists because
+ * a proposal's results and its presentation in the case-studies picker are two
+ * different places in the app and there was no way to get from one to the other.
+ * Landing on the page without the card being visible would leave the visitor to
+ * hunt for the proposal they just asked to see, so the card is scrolled to and
+ * briefly outlined.
+ *
+ * @param {string} id
+ */
+export function revealProposal(id) {
+    setActiveStudy(id);
+
+    const grid = document.getElementById('casesGrid');
+    if (!grid) return;
+
+    const card = grid.querySelector(`.case-card[data-proposal-id="${CSS.escape(id)}"]`);
+    if (!card) return;
+
+    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+    // A transient class rather than a persistent one: the pressed state already
+    // marks the card as selected, and this is only to catch the eye during the
+    // movement caused by the scroll above.
+    card.classList.add('is-revealed');
+    window.setTimeout(() => card.classList.remove('is-revealed'), 1600);
 }
 
 /**

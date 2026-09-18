@@ -2110,9 +2110,160 @@
         .tools-study-actions {
             display: flex;
             justify-content: flex-end;
+            gap: 9px;
             margin-top: 14px;
             padding-top: 12px;
             border-top: 1px solid rgba(255, 255, 255, 0.07);
+        }
+
+        /* --- Read-only view of a built-in proposal --------------------------- */
+
+        /* Not a form: a built-in proposal ships complete, so this reports what
+           is in there rather than offering to change it. Styled as a list to
+           make that obvious before the copy is read. */
+        .tools-builtin {
+            padding: 4px 0;
+        }
+        .tools-builtin-lede {
+            margin: 0 0 12px;
+            max-width: 70ch;
+            font-size: 12px;
+            line-height: 1.55;
+            color: #a9b0b8;
+        }
+        .tools-builtin-list {
+            margin: 0;
+            padding: 0;
+            list-style: none;
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+            gap: 6px 18px;
+        }
+        .tools-builtin-list li {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 6px 0;
+            font-size: 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        .tools-builtin-name {
+            color: #d6dae0;
+        }
+        /* The state is in the text as well as the colour, so the distinction
+           survives a colour-blind reader. */
+        .tools-builtin-yes,
+        .tools-builtin-no {
+            flex: none;
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 0.3px;
+            text-transform: uppercase;
+        }
+        .tools-builtin-yes {
+            color: #6fd0a8;
+        }
+        .tools-builtin-no {
+            color: #7d848c;
+        }
+        .tools-builtin-note {
+            margin: 14px 0 0;
+            font-size: 11.5px;
+            color: #8f959d;
+        }
+
+        /* --- Proposal image -------------------------------------------------- */
+
+        .tools-image {
+            margin: 4px 0 18px;
+            padding: 13px 14px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.025);
+        }
+        .tools-image-head {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 6px;
+        }
+        .tools-image-title {
+            font-size: 12.5px;
+            font-weight: 600;
+        }
+        .tools-image-optional {
+            padding: 1px 6px;
+            border-radius: 3px;
+            background: rgba(255, 255, 255, 0.07);
+            color: #8f959d;
+            font-size: 9.5px;
+            font-weight: 600;
+            letter-spacing: 0.35px;
+            text-transform: uppercase;
+        }
+        .tools-image-caption {
+            margin: 0 0 12px;
+            max-width: 72ch;
+            font-size: 11.5px;
+            line-height: 1.55;
+            color: #8f959d;
+        }
+        .tools-image-row {
+            display: flex;
+            align-items: flex-start;
+            gap: 14px;
+            flex-wrap: wrap;
+        }
+        .tools-image-preview {
+            flex: none;
+            width: 168px;
+            height: 105px;
+            border-radius: 5px;
+            overflow: hidden;
+            background: #0f1114;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .tools-image-preview img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+        /* No image yet: hatched, so it reads as a placeholder rather than as a
+           failed load. Matches the empty slot on the case-studies card. */
+        .tools-image-preview.is-empty {
+            background: repeating-linear-gradient(
+                45deg,
+                #131519,
+                #131519 8px,
+                #171a1f 8px,
+                #171a1f 16px
+            );
+        }
+        .tools-image-controls {
+            display: flex;
+            align-items: center;
+            gap: 9px;
+            flex-wrap: wrap;
+        }
+        .tools-image-feedback {
+            margin: 10px 0 0;
+            font-size: 11.5px;
+            line-height: 1.5;
+        }
+        .tools-image-feedback.is-bad {
+            color: #ebb9b9;
+        }
+        /* Feedback with no message should take no space. */
+        .tools-image-feedback:empty {
+            display: none;
+        }
+
+        /* Brief outline on the card a "Show the proposal" button scrolled to, so
+           the eye can find it after the movement stops. Removed by a timer. */
+        .case-card.is-revealed {
+            box-shadow: 0 0 0 2px #8fc7ff, 0 6px 22px rgba(0, 0, 0, 0.45);
         }
 
         /* --- One quality slot ------------------------------------------------ */
@@ -3082,7 +3233,22 @@
             setTimeout(initializePanelCollapse, 130);
         }
     </script>
-    <script type="module" src="main.js"></script>
+    <!--
+      `v` busts the module cache, and it is not cosmetic.
+
+      The app is served with `cache-control: max-age=3600` on its JavaScript, and
+      browsers honour that for ES module imports as well as for the document. So
+      after a deploy, a returning visitor can keep running the *previous* module
+      graph for up to an hour: imports resolve against cached files, and a module
+      that now imports a newly-added export fails outright with
+      "does not provide an export named …", because the cached copy of the
+      dependency is the old one. The page then does not boot at all.
+
+      Every deploy must therefore change this value, and it has to change in the
+      same commit as any source change. `tools/build-firebase-deploy.mjs` stamps
+      it with the build time.
+    -->
+    <script type="module" src="main.js?v=__BUILD_V__"></script>
 </body>
 </html>
 

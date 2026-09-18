@@ -23,21 +23,27 @@
 import {
     QUALITIES,
     addStudy,
+    clearProposalImage,
     clearUpload,
     filledSlotCount,
     getBuiltIn,
+    getProposalImage,
     getSlotContent,
     getStudyList,
     getUpload,
     onDataRegistryChange,
     removeStudy,
+    setProposalImage,
     setUpload,
     uploadCount,
 } from './dataRegistry.js';
 import { validateUpload } from './uploadValidation.js';
+import { prepareProposalImage } from './imageStore.js';
 import { buildToolsToc } from './docView.js';
 import { buildPlotWarning, buildPlotPanels } from './plotting.js';
 import { buildPartnerSection } from './partnerIntegrations.js';
+import { gotoPage } from './pageController.js';
+import { revealProposal } from './caseStudies.js';
 
 /** @type {HTMLElement|null} */
 let rootEl = null;
@@ -67,6 +73,18 @@ let expandedStudyId;
  * @type {Map<string, import('./uploadValidation.js').Check>}
  */
 const checks = new Map();
+
+/**
+ * The last message from a proposal-image attempt, or null when there is none.
+ *
+ * Module-level for the same reason `checks` is: a successful store triggers a
+ * re-render, which rebuilds the slot from scratch, so a message written straight
+ * into the old DOM would be discarded before it could be read. Only failures use
+ * it — a success is self-evident from the preview appearing.
+ *
+ * @type {string|null}
+ */
+let imageNotice = null;
 
 function checkKey(studyId, qualityId) {
     return `${studyId}::${qualityId}`;
@@ -364,6 +382,193 @@ function buildLoadedSummary(study, loaded) {
 }
 
 /**
+ * What a built-in proposal contains, stated rather than offered for editing.
+ *
+ * Deliberately not a set of disabled file inputs: a greyed-out control still
+ * reads as a control, and the visitor is left wondering what would enable it.
+ * This is a list, not a form. It exists so someone can tell which qualities the
+ * shipped example covers without opening every assessment page.
+ *
+ * @param {{id: string}} study
+ */
+function buildBuiltInList(study) {
+    const wrap = document.createElement('div');
+    wrap.className = 'tools-builtin';
+
+    const lede = document.createElement('p');
+    lede.className = 'tools-builtin-lede';
+    lede.textContent =
+        'This proposal ships with the viewer, so its results are already loaded and there is ' +
+        'nothing to upload. The qualities it covers:';
+    wrap.appendChild(lede);
+
+    const list = document.createElement('ul');
+    list.className = 'tools-builtin-list';
+
+    QUALITIES.forEach((quality) => {
+        const builtIn = getBuiltIn(study.id, quality.id);
+        const item = document.createElement('li');
+        item.className = builtIn ? 'is-present' : 'is-absent';
+
+        const name = document.createElement('span');
+        name.className = 'tools-builtin-name';
+        name.textContent = quality.label;
+        item.appendChild(name);
+
+        const mark = document.createElement('span');
+        mark.className = builtIn ? 'tools-builtin-yes' : 'tools-builtin-no';
+        // Says which it is in words as well as in colour, so the distinction
+        // survives a colour-blind reader and a monochrome print.
+        mark.textContent = builtIn ? 'included' : 'not included';
+        item.appendChild(mark);
+
+        list.appendChild(item);
+    });
+
+    wrap.appendChild(list);
+
+    const note = document.createElement('p');
+    note.className = 'tools-builtin-note';
+    note.textContent =
+        'To see it in context, use “Show the proposal”, or pick it on the Case studies page.';
+    wrap.appendChild(note);
+
+    return wrap;
+}
+
+/**
+ * The optional cover image for a visitor-added proposal.
+ *
+ * Offered because a proposal's card in the case-studies picker is how it is
+ * presented to anyone else looking at the page, and without an image that card is
+ * an empty slot. It is optional: an empty slot is honest, a wrong picture is not.
+ *
+ * The image is downscaled before storage (see `imageStore.js`) and stored as a
+ * data URL, so unlike the uploads it *does* survive a reload. That difference is
+ * stated on the control, because the visitor has just been told elsewhere that
+ * uploads are not saved and would otherwise reasonably assume this is not either.
+ *
+ * @param {{id: string, label: string}} study
+ */
+function buildImageSlot(study) {
+    const wrap = document.createElement('div');
+    wrap.className = 'tools-image';
+
+    const head = document.createElement('div');
+    head.className = 'tools-image-head';
+
+    const title = document.createElement('span');
+    title.className = 'tools-image-title';
+    title.textContent = 'Proposal image';
+    head.appendChild(title);
+
+    const optional = document.createElement('span');
+    optional.className = 'tools-image-optional';
+    optional.textContent = 'optional';
+    head.appendChild(optional);
+
+    wrap.appendChild(head);
+
+    const caption = document.createElement('p');
+    caption.className = 'tools-image-caption';
+    caption.textContent =
+        'Shown on this proposal’s card in Case studies. Without one the card shows an empty ' +
+        'slot rather than another proposal’s picture. Saved in this browser, so it survives ' +
+        'a reload — unlike the result files above.';
+    wrap.appendChild(caption);
+
+    const current = getProposalImage(study.id);
+
+    const row = document.createElement('div');
+    row.className = 'tools-image-row';
+
+    const preview = document.createElement('div');
+    preview.className = current ? 'tools-image-preview' : 'tools-image-preview is-empty';
+    if (current) {
+        const img = document.createElement('img');
+        img.src = current;
+        img.alt = `Image for ${study.label}`;
+        preview.appendChild(img);
+    }
+    row.appendChild(preview);
+
+    const controls = document.createElement('div');
+    controls.className = 'tools-image-controls';
+
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = 'image/png,image/jpeg,image/webp';
+    fileInput.id = `toolsImage-${study.id}`;
+    fileInput.className = 'tools-file';
+
+    const pick = document.createElement('label');
+    pick.className = 'tools-btn';
+    pick.htmlFor = fileInput.id;
+    pick.textContent = current ? 'Replace image' : 'Choose image';
+    controls.appendChild(pick);
+    controls.appendChild(fileInput);
+
+    // Shown under the controls, and the only place this row reports anything:
+    // an image can fail to store for a reason worth naming (too large), so a
+    // silent failure would be the wrong behaviour here.
+    const feedback = document.createElement('p');
+    feedback.className = 'tools-image-feedback';
+
+    fileInput.addEventListener('change', async () => {
+        const file = fileInput.files && fileInput.files[0];
+        if (!file) return;
+
+        pick.textContent = 'Processing…';
+        pick.classList.add('is-busy');
+        feedback.textContent = '';
+        feedback.className = 'tools-image-feedback';
+
+        const prepared = await prepareProposalImage(file);
+        if (!prepared.ok) {
+            feedback.classList.add('is-bad');
+            feedback.textContent = prepared.error;
+            pick.textContent = current ? 'Replace image' : 'Choose image';
+            pick.classList.remove('is-busy');
+            fileInput.value = '';
+            return;
+        }
+
+        const stored = setProposalImage(study.id, prepared.dataUrl);
+        // A storage failure is not fatal: the image is in memory and will show
+        // until the tab closes. Saying so is better than pretending it saved.
+        imageNotice = stored.ok ? null : stored.error;
+        render();
+    });
+
+    if (current) {
+        const clear = document.createElement('button');
+        clear.type = 'button';
+        clear.className = 'tools-btn tools-btn-quiet';
+        clear.textContent = 'Remove image';
+        clear.addEventListener('click', () => {
+            clearProposalImage(study.id);
+            imageNotice = null;
+            render();
+        });
+        controls.appendChild(clear);
+    }
+
+    row.appendChild(controls);
+    wrap.appendChild(row);
+
+    // The message is held on the module so it survives the re-render that follows
+    // a successful store, in the same way the validation messages do.
+    const notice = imageNotice;
+    if (notice) {
+        feedback.classList.add('is-bad');
+        feedback.textContent = notice;
+    }
+
+    wrap.appendChild(feedback);
+    return wrap;
+}
+
+/**
  * One proposal and its quality slots.
  *
  * Rendered as a disclosure rather than an always-open block because a visitor
@@ -447,18 +652,45 @@ function buildStudyGroup(study) {
         const body = document.createElement('div');
         body.className = 'tools-study-body';
 
-        const hint = document.createElement('p');
-        hint.className = 'tools-study-hint';
-        hint.textContent =
-            'Add the results you have. A slot left empty is not an error — the pages that ' +
-            'need it stay hidden, and the rest still render.';
-        body.appendChild(hint);
+        if (study.builtIn) {
+            // A built-in proposal gets no upload controls at all. Offering a
+            // "Choose file" button next to results that ship with the viewer
+            // invites a visitor to try to replace or extend them, which is not
+            // possible: the files are part of the site, and the next reload
+            // restores them. What the row is good for is saying what is in there,
+            // so that is all it does — see `buildBuiltInList`.
+            body.appendChild(buildBuiltInList(study));
+        } else {
+            const hint = document.createElement('p');
+            hint.className = 'tools-study-hint';
+            hint.textContent =
+                'Add the results you have. A slot left empty is not an error — the pages that ' +
+                'need it stay hidden, and the rest still render.';
+            body.appendChild(hint);
 
-        QUALITIES.forEach((quality) => body.appendChild(buildQualityRow(study, quality)));
+            body.appendChild(buildImageSlot(study));
+
+            QUALITIES.forEach((quality) => body.appendChild(buildQualityRow(study, quality)));
+        }
 
         if (study.userAdded) {
             const actions = document.createElement('div');
             actions.className = 'tools-study-actions';
+
+            const show = document.createElement('button');
+            show.type = 'button';
+            show.className = 'tools-btn';
+            show.textContent = 'Show the proposal';
+            show.title = 'Open this proposal in Case studies';
+            show.addEventListener('click', () => {
+                // Switch page first, then select: `gotoPage` is async because it
+                // animates the camera and swaps layers, and revealing a card in
+                // an overlay that is not on screen yet would scroll the wrong
+                // thing. Selecting the study is the last thing that happens, so
+                // the case-studies footer already names it when it appears.
+                gotoPage('cases').then(() => revealProposal(study.id));
+            });
+            actions.appendChild(show);
 
             const remove = document.createElement('button');
             remove.type = 'button';

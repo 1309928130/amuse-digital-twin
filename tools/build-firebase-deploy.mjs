@@ -74,7 +74,18 @@ const EXCLUDE_FILES = new Set([
 ]);
 
 /** Root-level files copied into the bundle. */
-const COPY_FILES = ['index.html', 'main.js'];
+const COPY_FILES = [
+    'index.html',
+    'main.js',
+    // Favicons. Listed explicitly because this is an allowlist: anything not
+    // named here is silently left out of the deployed site, which is how the tab
+    // icon would go missing while working locally.
+    'favicon.svg',
+    'favicon-32.png',
+    'favicon-192.png',
+    'favicon-512.png',
+    'apple-touch-icon.png',
+];
 
 /**
  * Files resolved through symlinks rather than copied as links.
@@ -91,6 +102,101 @@ async function isSymlink(p) {
     }
 }
 
+/**
+ * Rewrite relative `import`/`export` specifiers in a JS file to carry a version
+ * query, so a deploy cannot leave a visitor on a stale module graph.
+ *
+ * ## The problem this solves, and why stamping only `index.html` was not enough
+ *
+ * The app's JavaScript is served with `cache-control: max-age=3600`. Browsers
+ * apply that to ES module fetches, and they key the module registry by resolved
+ * URL. So:
+ *
+ *   1. A visitor loads the site and caches `src/caseStudies.js`.
+ *   2. A deploy adds a new export to that file and adds a consumer of it.
+ *   3. The visitor returns within the hour. `index.html` is re-fetched, but
+ *      `caseStudies.js` comes from cache, so the consumer's import fails with
+ *      "does not provide an export named …" and the app never boots.
+ *
+ * Stamping the entry point alone does not help, because `main.js` imports its
+ * dependencies by plain path: the cache-busting stops at the first hop.
+ *
+ * So every relative specifier gets the same query. A non-relative specifier (a
+ * bare package name, or a URL) is left alone — those are either resolved by an
+ * import map with its own caching story, or served by someone else.
+ *
+ * ## Why the version is repeated in every file rather than defined once
+ *
+ * A module cannot know its own query string: `import.meta.url` carries it, but
+ * imports are resolved statically, before any code runs. So the value has to be
+ * written in literally wherever a specifier appears, which is what this does.
+ *
+ * @param {string} code
+ * @param {string} version
+ * @returns {{code: string, rewritten: number}}
+ */
+function versionModuleSpecifiers(code, version) {
+    let rewritten = 0;
+
+    // Matches `from './x.js'`, `from "../lib/x.js"`, and `import('./x.js')`.
+    // Deliberately narrow: only relative specifiers ending in `.js`, which is
+    // every import in this app, so a bare specifier or an already-versioned URL
+    // cannot be mangled by a broad pattern.
+    const pattern = /(\bfrom\s+|\bimport\s*\(\s*)(['"])(\.\.?\/[^'"]+\.js)\2/g;
+
+    const output = code.replace(pattern, (match, lead, quote, spec) => {
+        // A specifier that already carries a query is left as it is: the build
+        // should be idempotent, and double-stamping would produce a URL that
+        // changes on every run.
+        if (spec.includes('?')) return match;
+        rewritten += 1;
+        return `${lead}${quote}${spec}?v=${version}${quote}`;
+    });
+
+    return { code: output, rewritten };
+}
+
+/**
+ * Copy the app's JavaScript, versioning every relative import specifier.
+ *
+ * @param {string} from
+ * @param {string} to
+ * @param {string} version
+ * @returns {Promise<number>} Specifiers rewritten.
+ */
+async function copyVersionedJs(from, to, version) {
+    const code = await fs.readFile(from, 'utf8');
+    const { code: stamped, rewritten } = versionModuleSpecifiers(code, version);
+    await fs.writeFile(to, stamped, 'utf8');
+    return rewritten;
+}
+
+/**
+ * Copy `index.html`, replacing the module-cache stamp with the build time.
+ *
+ * Pairs with {@link versionModuleSpecifiers}: this stamps the entry point, and
+ * that stamps everything the entry point reaches. Both are needed. Without this
+ * one, the browser reuses the cached `main.js` and nothing below it is even
+ * requested; without that one, `main.js` loads but its dependencies come from
+ * the cache.
+ *
+ * @param {string} from
+ * @param {string} to
+ * @param {string} version
+ */
+async function writeStampedHtml(from, to, version) {
+    const html = await fs.readFile(from, 'utf8');
+    if (!html.includes('__BUILD_V__')) {
+        // Not an error: an unstamped source still deploys, it just keeps the
+        // caching behaviour. Worth a warning because it is almost certainly not
+        // what the person building intends.
+        console.warn('[deploy] index.html has no __BUILD_V__ placeholder; module caching will not be busted.');
+        await copyFile(from, to);
+        return;
+    }
+    await fs.writeFile(to, html.replaceAll('__BUILD_V__', version), 'utf8');
+}
+
 async function main() {
     if (!existsSync(path.join(APP_ROOT, 'index.html'))) {
         console.error(`[deploy] No index.html in ${APP_ROOT}; run from the app root.`);
@@ -99,8 +205,22 @@ async function main() {
 
     const copied = { files: 0, bytes: 0 };
     const skipped = [];
+    /** Specifiers rewritten across the whole build, reported at the end. */
+    let versionedSpecifiers = 0;
 
-    async function copyTree(from, to, relBase = '') {
+    /**
+     * Copy a tree into the bundle.
+     *
+     * `version` is threaded through rather than read from a module-scope
+     * variable so it is impossible to copy a JS file with the wrong stamp: the
+     * caller has to have the version in hand to recurse.
+     *
+     * @param {string} from
+     * @param {string} to
+     * @param {string} [relBase] Path relative to the app root, for exclusions.
+     * @param {string} [version] Module cache version, when rewriting JS.
+     */
+    async function copyTree(from, to, relBase = '', version = '') {
         const entries = await readdir(from, { withFileTypes: true });
         await mkdir(to, { recursive: true });
         for (const entry of entries) {
@@ -127,14 +247,22 @@ async function main() {
 
             const info = await stat(real);
             if (info.isDirectory()) {
-                await copyTree(real, dst, rel);
+                await copyTree(real, dst, rel, version);
             } else {
                 if (DRY_RUN) {
                     copied.files += 1;
                     copied.bytes += info.size;
                     continue;
                 }
-                await copyFile(real, dst);
+                // Only the app's own source is rewritten. `framework/` holds
+                // Markdown and PDFs, and `models/` holds GLBs: neither is an ES
+                // module, and rewriting a specifier pattern inside them would
+                // corrupt the asset rather than version it.
+                if (version && rel.startsWith('src/') && entry.name.endsWith('.js')) {
+                    versionedSpecifiers += await copyVersionedJs(real, dst, version);
+                } else {
+                    await copyFile(real, dst);
+                }
                 copied.files += 1;
                 copied.bytes += info.size;
             }
@@ -147,13 +275,18 @@ async function main() {
         await mkdir(OUT, { recursive: true });
     }
 
+    // One version for the whole build: the entry point and every specifier in
+    // the graph must agree, or a module could be fetched twice under two URLs
+    // and hold two copies of the same state.
+    const version = String(Date.now());
+
     for (const dir of COPY_DIRS) {
         const from = path.join(APP_ROOT, dir);
         if (!existsSync(from)) {
             console.warn(`[deploy] skipping missing directory: ${dir}`);
             continue;
         }
-        await copyTree(from, path.join(OUT, dir), dir);
+        await copyTree(from, path.join(OUT, dir), dir, version);
         console.log(`[deploy] dir   ${dir}/`);
     }
 
@@ -163,10 +296,35 @@ async function main() {
             console.warn(`[deploy] skipping missing file: ${file}`);
             continue;
         }
-        if (!DRY_RUN) await copyFile(from, path.join(OUT, file));
+        if (DRY_RUN) {
+            copied.files += 1;
+            copied.bytes += info.size;
+            console.log(`[deploy] file  ${file}`);
+            continue;
+        }
+        if (file === 'index.html') {
+            await writeStampedHtml(from, path.join(OUT, file), version);
+        } else if (file.endsWith('.js')) {
+            // The entry point has to be versioned too, and it is easy to miss
+            // because it is copied here rather than through `copyTree`. Missing
+            // it is not a cosmetic bug: `index.html` would request
+            // `main.js?v=N` while `main.js` itself imported plain paths, so its
+            // dependencies would be fetched at *unversioned* URLs and load a
+            // second time as separate module instances. Two copies of
+            // `cesiumViewer.js` means two `viewer` variables, and the app dies
+            // with "Viewer not initialized" — from a file whose import lines
+            // look completely ordinary.
+            versionedSpecifiers += await copyVersionedJs(from, path.join(OUT, file), version);
+        } else {
+            await copyFile(from, path.join(OUT, file));
+        }
         copied.files += 1;
         copied.bytes += (await stat(from)).size;
         console.log(`[deploy] file  ${file}`);
+    }
+
+    if (!DRY_RUN) {
+        console.log(`[deploy] module cache version: ${version} (${versionedSpecifiers} specifiers rewritten)`);
     }
 
     const mb = (copied.bytes / 1048576).toFixed(1);

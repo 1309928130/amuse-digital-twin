@@ -152,6 +152,135 @@ const addedStudies = new Map();
  */
 const STUDIES_KEY = 'pedmodel.tools.addedStudies';
 
+/**
+ * Where a proposal's profile image is remembered, keyed by study id.
+ *
+ * Stored as a data URL rather than a blob URL, and that is a real trade rather
+ * than an oversight.
+ *
+ * The uploads proper use blob URLs, which is cheaper and keeps the bytes out of
+ * storage. But this image has to survive a reload to be worth anything — a
+ * proposal's picture in the case-studies picker is part of how the proposal
+ * presents itself, and one that vanished on refresh would look like the same
+ * disappearing-file bug the upload slots already have to apologise for. A blob
+ * URL is dead as soon as the document that made it goes away, so it cannot carry
+ * anything across sessions; a data URL can.
+ *
+ * The cost is `localStorage` quota (a few MB). So the image is downscaled before
+ * it is stored (see `imageStore.js`), which keeps a typical screenshot to tens of
+ * kilobytes, and a failure to store is reported rather than swallowed, because
+ * the visitor's mental model is "my proposal has a picture" and they need to know
+ * if that is not going to hold.
+ *
+ * Built-in proposals have no entry here: their artwork is a file in the repo, and
+ * nothing should be able to overwrite it.
+ */
+const IMAGES_KEY = 'pedmodel.tools.proposalImages';
+
+/** @type {Map<string, string>} study id -> data URL. Loaded once at module init. */
+const proposalImages = new Map();
+
+/** Read stored proposal images back from `localStorage`. */
+function loadPersistedImages() {
+    if (typeof localStorage === 'undefined') return;
+    try {
+        const raw = localStorage.getItem(IMAGES_KEY);
+        if (!raw) return;
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object') return;
+        Object.entries(parsed).forEach(([id, value]) => {
+            // Validated as a data URL specifically. This is user-writable storage
+            // and the value is fed straight to `img.src`, so anything else —
+            // a remote URL, a `javascript:` string — must not get through.
+            if (typeof id !== 'string' || !id) return;
+            if (typeof value !== 'string' || !value.startsWith('data:image/')) return;
+            proposalImages.set(id, value);
+        });
+    } catch (error) {
+        console.warn('[dataRegistry] Could not read stored proposal images:', error);
+    }
+}
+
+/**
+ * Persist proposal images, reporting whether it worked.
+ *
+ * Distinguished from `persistStudies` by its return value: names are small and
+ * a failure there is a shrug, but an image can exceed the quota, and a visitor
+ * who uploaded one and then lost it silently would have no idea why. The caller
+ * shows the outcome.
+ *
+ * @returns {{ok: boolean, error?: string}}
+ */
+function persistImages() {
+    if (typeof localStorage === 'undefined') {
+        return { ok: false, error: 'This browser has no local storage available.' };
+    }
+    try {
+        const payload = Object.fromEntries(proposalImages);
+        if (proposalImages.size === 0) {
+            localStorage.removeItem(IMAGES_KEY);
+        } else {
+            localStorage.setItem(IMAGES_KEY, JSON.stringify(payload));
+        }
+        return { ok: true };
+    } catch (error) {
+        // Overwhelmingly a quota error: the image is too large to keep. Named as
+        // such because "it did not save" without a reason invites a retry that
+        // will fail identically.
+        return {
+            ok: false,
+            error: 'Too large to save in this browser. The image is used for this session only.',
+        };
+    }
+}
+
+/**
+ * The profile image for a study, or `null` when it has none of its own.
+ *
+ * Built-in proposals resolve to their authored file; visitor-added ones resolve
+ * to their stored image. A visitor-added proposal with no image resolves to
+ * `null` rather than borrowing anyone else's picture — the case-studies card
+ * renders an empty slot for that, which is honest, where a borrowed image is
+ * actively misleading.
+ *
+ * @param {string} studyId
+ * @returns {string|null}
+ */
+export function getProposalImage(studyId) {
+    const stored = proposalImages.get(studyId);
+    if (stored) return stored;
+    // Built-in artwork comes from `pageConfig`, consulted via the caller that
+    // already has it (the case-studies picker) rather than duplicated here.
+    return null;
+}
+
+/**
+ * Attach an image to a study, as a data URL.
+ *
+ * @param {string} studyId
+ * @param {string} dataUrl Already downscaled by `imageStore.js`.
+ * @returns {{ok: boolean, error?: string}}
+ */
+export function setProposalImage(studyId, dataUrl) {
+    if (!addedStudies.has(studyId)) {
+        // Built-in proposals keep their authored artwork. Refusing here means no
+        // code path can quietly replace a file that ships with the site.
+        return { ok: false, error: 'Only proposals you added can have an image set.' };
+    }
+    proposalImages.set(studyId, dataUrl);
+    const result = persistImages();
+    emitChange();
+    return result;
+}
+
+/** Remove a study's image, if it has one. */
+export function clearProposalImage(studyId) {
+    if (!proposalImages.delete(studyId)) return false;
+    persistImages();
+    emitChange();
+    return true;
+}
+
 /** Read added proposals back from `localStorage`. */
 function loadPersistedStudies() {
     if (typeof localStorage === 'undefined') return;
@@ -199,6 +328,7 @@ function persistStudies() {
 
 // Restored at module load so the list is complete before any view renders.
 loadPersistedStudies();
+loadPersistedImages();
 
 /** Fired whenever uploads or added studies change, so views can refresh. */
 const listeners = new Set();
@@ -274,6 +404,10 @@ export function addStudy(label) {
 export function removeStudy(studyId) {
     if (!addedStudies.has(studyId)) return false;
     clearStudyUploads(studyId);
+    // The image goes with the proposal: leaving it behind would strand a stored
+    // data URL against an id nothing refers to any more, and that space counts
+    // against the same quota the next proposal's image needs.
+    if (proposalImages.delete(studyId)) persistImages();
     addedStudies.delete(studyId);
     persistStudies();
     emitChange();
@@ -537,6 +671,9 @@ if (typeof window !== 'undefined') {
         getSlotContent,
         resolveDataPath,
         candidatePaths,
+        getProposalImage,
+        setProposalImage,
+        clearProposalImage,
         QUALITIES,
     };
 }

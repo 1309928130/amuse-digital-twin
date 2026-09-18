@@ -13,6 +13,26 @@
     <meta property="og:description"
           content="A federated 3D digital twin of the Zuidas area in Amsterdam, bringing sunlight, wind, pollution, heat, noise, visibility and pedestrian flow into one viewer for multisensory design assessment.">
     <meta name="theme-color" content="#14161a">
+
+    <!--
+        Icons. The SVG is listed first so browsers that support it use the
+        scalable mark; the PNGs cover the tab, Android home screen and iOS home
+        screen. Relative paths (./) rather than absolute, so the same markup works
+        from the deployed origin and from a local server.
+    -->
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg">
+    <link rel="icon" type="image/png" sizes="32x32" href="./favicon-32.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="./favicon-192.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png">
+    <!--
+        Social/embed preview. Uses the 512 PNG rather than the SVG because most
+        scrapers do not render SVG.
+    -->
+    <meta property="og:image" content="./favicon-512.png">
+    <meta property="og:image:width" content="512">
+    <meta property="og:image:height" content="512">
+    <meta name="twitter:card" content="summary">
+
     <script src="https://cesium.com/downloads/cesiumjs/releases/1.110/Build/Cesium/Cesium.js"></script>
     <link href="https://cesium.com/downloads/cesiumjs/releases/1.110/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
     <!-- Protobuf.js from CDN - load before modules -->
@@ -409,6 +429,20 @@
             --nav-height: 46px;
             /* Parameter panel: ~70% of the earlier 20vw */
             --right-panel-width: 14vw;
+            /* Width the panel collapses to. Wide enough to hold the toggle
+               button and read vertically as a tab, narrow enough to give the
+               viewport back on a phone. */
+            --right-panel-collapsed-width: 30px;
+        }
+
+        /* Collapsed state: the panel shrinks to a tab and the viewer, the
+           document view and the case-studies picker reclaim the space, because
+           they all size themselves from the same variable.
+
+           Declared on :root via a class on <body> rather than on #paramPanel, so
+           the sibling layouts that sit *behind* the panel follow it too. */
+        body.panel-collapsed {
+            --right-panel-width: var(--right-panel-collapsed-width);
         }
 
         /* ---- Top navigation bar ---- */
@@ -445,6 +479,16 @@
             border-right: 1px solid rgba(255, 255, 255, 0.16);
             flex: 0 0 auto;
             line-height: 1.2;
+            /* Pinned while the buttons scroll. The bar holds 13 assessment pages
+               plus this label, which overflows a laptop-width window, and a
+               scrollable bar that carries the brand away scrolls it out of sight
+               on arrival — the identity is the one thing that should not move.
+               Sticky against the bar's own scroll container keeps it in place
+               without taking the buttons out of the same row. */
+            position: sticky;
+            left: 0;
+            z-index: 1;
+            background: rgba(24, 24, 24, 0.93);
         }
         #topNav .nav-brand small {
             display: block;
@@ -497,6 +541,10 @@
             right: 0;
             bottom: 0;
             width: var(--right-panel-width);
+            /* The clamp is what makes the panel usable on a desktop and
+               unusable on a phone: at min-width 200px it takes over half a
+               390px-wide screen. It applies only while expanded — collapsed,
+               the panel must be free to shrink to the tab width. */
             min-width: 200px;
             max-width: 300px;
             z-index: 1000;
@@ -507,6 +555,145 @@
             padding: 12px 12px 22px;
             box-sizing: border-box;
             overflow-y: auto;
+            transition: width 0.18s ease;
+        }
+        body.panel-collapsed #paramPanel {
+            width: var(--right-panel-collapsed-width);
+            min-width: var(--right-panel-collapsed-width);
+            max-width: var(--right-panel-collapsed-width);
+            padding: 8px 0;
+            overflow: hidden;
+            cursor: pointer;
+        }
+        /* Everything except the toggle tab goes away when collapsed. The tab is
+           the only child left in the flow, so it reads as a pull-handle on the
+           screen edge rather than a truncated panel. */
+        body.panel-collapsed #paramPanel > :not(#panelToggleBtn) {
+            display: none;
+        }
+
+        /* ---- Panel collapse toggle ---- */
+        #panelToggleBtn {
+            position: sticky;
+            top: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            width: 100%;
+            background: none;
+            border: none;
+            color: #fff;
+            font-family: sans-serif;
+            font-size: 13px;
+            line-height: 1;
+            padding: 2px 0 6px;
+            cursor: pointer;
+            opacity: 0.6;
+            box-sizing: border-box;
+        }
+        #panelToggleBtn:hover {
+            opacity: 1;
+        }
+        #panelToggleBtn:focus-visible {
+            outline: 2px solid #8fc7ff;
+            outline-offset: -2px;
+        }
+        /* On a wide panel the tab rides in the top-right corner, inline with the
+           title; collapsed, it is the whole panel, so the arrow and the vertical
+           label stack instead. */
+        #panelToggleBtn {
+            flex-direction: row;
+            justify-content: flex-end;
+        }
+        body.panel-collapsed #panelToggleBtn {
+            flex-direction: column;
+            justify-content: flex-start;
+        }
+        #panelToggleBtn .panel-toggle-icon {
+            font-size: 12px;
+        }
+        /* Vertical label, only shown while collapsed, so the tab says what it
+           does without needing three times the width. */
+        #panelToggleBtn .panel-toggle-label {
+            display: none;
+            writing-mode: vertical-rl;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+        }
+        body.panel-collapsed #panelToggleBtn .panel-toggle-label {
+            display: block;
+        }
+
+        /* ---- Narrow screens: the panel takes too much of the viewport ----
+           A phone's default is the collapsed tab, applied as a media query rather
+           than by script so the first paint is already right — no flash of a
+           half-width panel covering the globe before JS runs.
+
+           720px is where the panel starts crowding a landscape phone or a small
+           tablet; the clamp above (200px min) means it is over a quarter of the
+           width by then, and over half on a portrait phone. */
+        @media (max-width: 720px) {
+            body:not(.panel-expanded-by-user) {
+                --right-panel-width: var(--right-panel-collapsed-width);
+            }
+            body:not(.panel-expanded-by-user) #paramPanel {
+                width: var(--right-panel-collapsed-width);
+                min-width: var(--right-panel-collapsed-width);
+                max-width: var(--right-panel-collapsed-width);
+                padding: 8px 0;
+                overflow: hidden;
+                cursor: pointer;
+            }
+            body:not(.panel-expanded-by-user) #paramPanel > :not(#panelToggleBtn) {
+                display: none;
+            }
+            body:not(.panel-expanded-by-user) #panelToggleBtn {
+                flex-direction: column;
+                justify-content: flex-start;
+            }
+            body:not(.panel-expanded-by-user) #panelToggleBtn .panel-toggle-label {
+                display: block;
+            }
+
+            /* The tools viewport stops short of the panel, so on a phone it
+               would be a few hundred pixels wide with the panel folded. The
+               upload rows would then wrap badly, so they stack. */
+            .tools-inner {
+                padding: 18px 16px 26px;
+            }
+            .tools-add-row {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            .tools-add-row .tools-btn {
+                align-self: flex-start;
+            }
+            .tools-quality-head {
+                flex-direction: column;
+                gap: 2px;
+            }
+            .tools-study-toggle {
+                flex-wrap: wrap;
+                gap: 6px;
+            }
+            .tools-study-count {
+                order: 3;
+                width: 100%;
+            }
+            /* The plotting page inherits the tools block styling, so it needs the
+               same narrow-screen treatment for its table and panels. */
+            .plot-panel {
+                padding: 14px 13px 15px;
+            }
+            .plot-legend {
+                gap: 10px;
+            }
+            .plot-table th,
+            .plot-table td {
+                padding: 6px 9px;
+            }
         }
         #paramPanel .param-scope {
             font-size: 10px;
@@ -566,6 +753,16 @@
         }
         #paramPanel.panel-light .param-scope {
             opacity: 0.55;
+        }
+        /* The collapse toggle sets its own colour (it is also used on the dark
+           panel, where inheriting would be wrong), so it needs re-pointing at the
+           document's ink. Scoped by id as well as class to outrank the #panelToggleBtn
+           rule above, which is an id selector and would otherwise win. */
+        #paramPanel.panel-light #panelToggleBtn {
+            color: #1f2328;
+        }
+        #paramPanel.panel-light #panelToggleBtn:focus-visible {
+            outline-color: #0969da;
         }
         /* Table of contents (framework page).
            A plain nested anchor list, styled after GitHub's own sidebar so the
@@ -666,6 +863,40 @@
             color: #3d444d;
         }
 
+        /* ---- Table of contents on the dark panel (Tools page) ----
+           The TOC colours above were written for the document's white panel and
+           are unreadable on the dark one, which is what the Tools page uses. These
+           come after so they win on specificity parity without needing !important. */
+        #paramPanel .param-toc-dark .toc-link {
+            color: #a9b0b8;
+        }
+        #paramPanel .param-toc-dark .toc-link:hover {
+            background: rgba(255, 255, 255, 0.07);
+            color: #e8eaed;
+        }
+        /* The active block is marked with the same accent the tools page uses for
+           "this one works", so the highlight reads as part of the page rather than
+           as a generic selection. */
+        #paramPanel .param-toc-dark .toc-link.is-active {
+            background: rgba(78, 201, 160, 0.16);
+            color: #4ec9a0;
+            font-weight: 600;
+        }
+        #paramPanel .param-toc-dark .toc-level-1 > .toc-link,
+        #paramPanel .param-toc-dark .toc-level-2 > .toc-link,
+        #paramPanel .param-toc-dark .toc-level-3 > .toc-link {
+            color: #d7dbe0;
+        }
+        #paramPanel .param-toc-dark .toc-link.is-active,
+        #paramPanel .param-toc-dark .toc-level-1 > .toc-link.is-active,
+        #paramPanel .param-toc-dark .toc-level-2 > .toc-link.is-active,
+        #paramPanel .param-toc-dark .toc-level-3 > .toc-link.is-active {
+            color: #4ec9a0;
+        }
+        #paramPanel .param-toc-dark .toc-empty {
+            color: #767c84;
+        }
+
         /* ---- Global legends: collapsible accordion at the panel bottom ---- */
         #paramPanel .param-section-title.param-accordion {
             display: flex;
@@ -695,6 +926,101 @@
         }
         #paramPanel .param-fold.open {
             display: block;
+        }
+
+        /* ---- Model validity: qualitative confidence rating + justification ---- */
+        /* The rating reads at a glance from the folded row, so a reader can judge
+           how much weight to put on a layer without opening the evidence. */
+        #paramPanel .validity-rating {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            padding: 2px 7px;
+            border-radius: 9px;
+            border: 1px solid currentColor;
+            white-space: nowrap;
+        }
+        #paramPanel .validity-rating .dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: currentColor;
+            flex: none;
+        }
+        #paramPanel .validity-rating[data-level="high"] {
+            color: #4ec9a0;
+        }
+        #paramPanel .validity-rating[data-level="medium"] {
+            color: #e2b33c;
+        }
+        #paramPanel .validity-rating[data-level="low"] {
+            color: #e07a5f;
+        }
+        /* Light theme: the pastel tones above are tuned for the dark panel and
+           wash out on white, so use the darker end of the same hues. */
+        #paramPanel.panel-light .validity-rating[data-level="high"] {
+            color: #1a7f5a;
+        }
+        #paramPanel.panel-light .validity-rating[data-level="medium"] {
+            color: #9a6700;
+        }
+        #paramPanel.panel-light .validity-rating[data-level="low"] {
+            color: #b5432c;
+        }
+        /* The header row pairs the title with the rating, so the score stays
+           visible once the evidence below is folded away. */
+        #paramPanel .validity-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 6px;
+            cursor: pointer;
+            user-select: none;
+            padding: 5px 0;
+        }
+        #paramPanel .validity-head:hover {
+            opacity: 0.85;
+        }
+        #paramPanel .validity-head .validity-label {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            opacity: 0.5;
+        }
+        #paramPanel .validity-head .chevron {
+            font-size: 9px;
+            opacity: 0.7;
+            transition: transform 0.18s ease;
+        }
+        #paramPanel .validity-head[aria-expanded="true"] .chevron {
+            transform: rotate(90deg);
+        }
+        #paramPanel .validity-basis {
+            font-size: 11px;
+            line-height: 1.45;
+            opacity: 0.65;
+            margin-top: 6px;
+        }
+        /* References are kept visually subordinate to the prose above them. */
+        #paramPanel .validity-refs {
+            font-size: 10px;
+            line-height: 1.5;
+            opacity: 0.55;
+            margin-top: 7px;
+            padding-left: 14px;
+        }
+        #paramPanel .validity-refs li {
+            margin-bottom: 3px;
+        }
+        #paramPanel .validity-refs .ref-key {
+            opacity: 0.75;
         }
         #paramPanel .param-group-divider {
             height: 1px;
@@ -1020,6 +1346,849 @@
             margin-top: 1px;
         }
 
+        /* ============================================================
+           Tools page
+           ============================================================
+           Same viewport-takeover layout as the case-studies picker, but the
+           content is a grid of capability cards rather than a choice of
+           studies. Kept on the dark theme so switching in from the map is not
+           a jarring flash of white. */
+        #toolsView {
+            position: absolute;
+            inset: var(--nav-height) var(--right-panel-width) 0 0;
+            z-index: 900;
+            display: flex;
+            flex-direction: column;
+            background: #14161a;
+            color: #e8eaed;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            overflow-y: auto;
+        }
+        #toolsView[hidden] {
+            display: none;
+        }
+        .tools-inner {
+            padding: 26px 30px 34px;
+            max-width: 1080px;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        .tools-head h2 {
+            margin: 0 0 8px;
+            font-size: 21px;
+            font-weight: 600;
+        }
+        .tools-head p {
+            margin: 0 0 24px;
+            max-width: 62ch;
+            font-size: 13px;
+            line-height: 1.55;
+            color: #a9b0b8;
+        }
+        .tools-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 16px;
+        }
+        .tool-badge {
+            flex: none;
+            padding: 2px 7px;
+            border-radius: 4px;
+            font-size: 9.5px;
+            font-weight: 600;
+            letter-spacing: 0.35px;
+            text-transform: uppercase;
+            white-space: nowrap;
+        }
+        .tool-badge-planned {
+            background: rgba(217, 138, 0, 0.16);
+            color: #e0a44a;
+        }
+        .tool-badge-available {
+            background: rgba(78, 201, 160, 0.18);
+            color: #4ec9a0;
+        }
+        .tools-io {
+            display: flex;
+            align-items: baseline;
+            gap: 9px;
+            margin-bottom: 6px;
+        }
+        .tool-io-label {
+            flex: none;
+            width: 58px;
+            font-size: 9.5px;
+            font-weight: 600;
+            letter-spacing: 0.4px;
+            text-transform: uppercase;
+            color: #6f757d;
+        }
+        .tool-chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+        }
+        .tool-chip {
+            padding: 2px 7px;
+            border-radius: 4px;
+            background: rgba(255, 255, 255, 0.07);
+            border: 1px solid rgba(255, 255, 255, 0.09);
+            font-size: 10.5px;
+            color: #b8bec6;
+        }
+        .tools-note {
+            margin: 22px 0 0;
+            padding: 11px 13px;
+            max-width: 62ch;
+            border-left: 3px solid #d98a00;
+            border-radius: 3px;
+            background: rgba(217, 138, 0, 0.1);
+            font-size: 11.5px;
+            line-height: 1.55;
+            color: #d8dde3;
+        }
+
+        /* --- Tool blocks ----------------------------------------------------- */
+
+        /* Every tool is one of these, whether it works or not. The single builder
+           in `toolsView.js` keeps the title size, badge position and spacing
+           identical across them, so no block can end up looking more important
+           than its neighbours by accident. */
+        .tools-block {
+            margin-top: 22px;
+            padding: 18px 19px 19px;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 8px;
+            background: #1a1d22;
+        }
+        .tools-block:first-of-type {
+            margin-top: 0;
+        }
+        /* A block that is not built yet is dimmed and dashed, so the page reads
+           at a glance as "only the first one works" without needing the badges. */
+        .tools-block[data-block="broker"],
+        .tools-block[data-block="plot"] {
+            border-style: dashed;
+            background: #17191d;
+        }
+        .tools-block-head {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        .tools-block-title {
+            margin: 0;
+            font-size: 15px;
+            font-weight: 600;
+            line-height: 1.3;
+        }
+        .tools-block-lede {
+            margin: 0 0 16px;
+            max-width: 62ch;
+            font-size: 12.5px;
+            line-height: 1.55;
+            color: #a9b0b8;
+        }
+        .tools-block-body {
+            margin-top: 2px;
+        }
+
+        .tools-ledger {
+            margin: 0 0 18px;
+            padding: 9px 12px;
+            border-radius: 5px;
+            background: rgba(255, 255, 255, 0.045);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            font-size: 11.5px;
+            line-height: 1.5;
+            color: #a9b0b8;
+        }
+        .tools-ledger-line {
+            margin: 0;
+        }
+
+        /* --- Add a proposal -------------------------------------------------- */
+
+        .tools-add {
+            margin-bottom: 20px;
+        }
+        .tools-add-label {
+            display: block;
+            margin-bottom: 6px;
+            font-size: 9.5px;
+            font-weight: 600;
+            letter-spacing: 0.45px;
+            text-transform: uppercase;
+            color: #6f757d;
+        }
+        .tools-add-row {
+            display: flex;
+            gap: 8px;
+            max-width: 560px;
+        }
+        .tools-input {
+            flex: 1;
+            min-width: 0;
+            padding: 8px 10px;
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            border-radius: 5px;
+            background: #1a1d22;
+            color: #e8eaed;
+            font-size: 12.5px;
+            font-family: inherit;
+        }
+        .tools-input:focus {
+            outline: 2px solid rgba(78, 201, 160, 0.5);
+            outline-offset: 1px;
+            border-color: transparent;
+        }
+        .tools-input::placeholder {
+            color: #5f656d;
+        }
+
+        /* --- Buttons --------------------------------------------------------- */
+
+        /* Overrides the global button styling: these sit inside the tools
+           viewport, which has its own dark palette. */
+        .tools-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            flex: none;
+            padding: 7px 13px;
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            border-radius: 5px;
+            background: rgba(255, 255, 255, 0.05);
+            color: #dfe3e8;
+            font-size: 12px;
+            font-family: inherit;
+            line-height: 1.2;
+            cursor: pointer;
+            transition: background 120ms ease, border-color 120ms ease;
+        }
+        .tools-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: rgba(255, 255, 255, 0.26);
+        }
+        .tools-btn:focus-visible {
+            outline: 2px solid rgba(78, 201, 160, 0.55);
+            outline-offset: 1px;
+        }
+        .tools-btn-primary {
+            border-color: rgba(78, 201, 160, 0.5);
+            background: rgba(78, 201, 160, 0.16);
+            color: #7fd9b8;
+        }
+        .tools-btn-primary:hover {
+            background: rgba(78, 201, 160, 0.24);
+            border-color: rgba(78, 201, 160, 0.65);
+        }
+        .tools-btn-quiet {
+            padding: 3px 9px;
+            font-size: 11px;
+            background: transparent;
+        }
+        .tools-btn-danger {
+            border-color: rgba(220, 90, 90, 0.42);
+            background: rgba(220, 90, 90, 0.12);
+            color: #e29090;
+        }
+        .tools-btn-danger:hover {
+            background: rgba(220, 90, 90, 0.2);
+            border-color: rgba(220, 90, 90, 0.6);
+        }
+        .tools-btn.is-busy {
+            opacity: 0.6;
+            pointer-events: none;
+        }
+
+        /* The file input is driven by its label, which is styled as a button.
+           Hidden rather than display:none so it stays focusable and announced. */
+        .tools-file {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
+        }
+        .tools-file:focus-visible + label,
+        .tools-btn:has(+ .tools-file:focus-visible) {
+            outline: 2px solid rgba(78, 201, 160, 0.55);
+            outline-offset: 1px;
+        }
+
+        /* --- Proposal groups ------------------------------------------------- */
+
+        .tools-studies {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .tools-study {
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 7px;
+            background: #1a1d22;
+            overflow: hidden;
+        }
+        .tools-study[data-expanded="true"] {
+            border-color: rgba(255, 255, 255, 0.2);
+        }
+        .tools-study-toggle {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            width: 100%;
+            padding: 12px 14px;
+            border: 0;
+            background: transparent;
+            color: #e8eaed;
+            font-family: inherit;
+            font-size: 13.5px;
+            text-align: left;
+            cursor: pointer;
+        }
+        .tools-study-toggle:hover {
+            background: rgba(255, 255, 255, 0.04);
+        }
+        .tools-study-toggle:focus-visible {
+            outline: 2px solid rgba(78, 201, 160, 0.55);
+            outline-offset: -2px;
+        }
+        .tools-chevron {
+            flex: none;
+            width: 11px;
+            font-size: 11px;
+            color: #8f959d;
+        }
+        .tools-study-name {
+            flex: 1;
+            min-width: 0;
+            font-weight: 600;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .tools-study-count {
+            flex: none;
+            font-size: 11px;
+            color: #8f959d;
+        }
+        .tools-study-flag {
+            flex: none;
+            padding: 2px 7px;
+            border-radius: 4px;
+            background: rgba(217, 138, 0, 0.16);
+            color: #e0a44a;
+            font-size: 9.5px;
+            font-weight: 600;
+            letter-spacing: 0.35px;
+            text-transform: uppercase;
+        }
+        .tools-study-note {
+            margin: 0;
+            padding: 0 14px 10px 35px;
+            font-size: 11px;
+            color: #7f858d;
+        }
+
+        /* --- Loaded-results summary on each proposal ------------------------ */
+
+        /* Sits under the group header and stays visible when the group is
+           collapsed, so what a proposal contains can be read without opening it. */
+        .tools-loaded {
+            display: flex;
+            align-items: baseline;
+            flex-wrap: wrap;
+            gap: 7px;
+            padding: 0 14px 11px 35px;
+        }
+        .tools-loaded-label {
+            flex: none;
+            font-size: 9.5px;
+            font-weight: 600;
+            letter-spacing: 0.45px;
+            text-transform: uppercase;
+            color: #6f757d;
+        }
+        .tools-loaded-chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+        }
+        .tools-loaded-chip {
+            padding: 2px 8px;
+            border-radius: 4px;
+            background: rgba(78, 201, 160, 0.14);
+            border: 1px solid rgba(78, 201, 160, 0.3);
+            color: #7fd9b8;
+            font-size: 10.5px;
+        }
+        /* Results that ship with the viewer, as opposed to the visitor's own.
+           Deliberately quieter: they are context, not something the reader did. */
+        .tools-loaded-chip-builtin {
+            background: rgba(255, 255, 255, 0.06);
+            border-color: rgba(255, 255, 255, 0.16);
+            color: #a9b0b8;
+        }
+        .tools-loaded-none {
+            font-size: 11px;
+            color: #767c84;
+        }
+
+        /* Marks a result the viewer ships with. Reads as a label, not a control,
+           because there is nothing to click — the data cannot be removed. */
+        .tools-builtin-tag {
+            flex: none;
+            margin-left: 7px;
+            padding: 1px 6px;
+            border-radius: 3px;
+            background: rgba(255, 255, 255, 0.08);
+            color: #9aa1a9;
+            font-size: 9.5px;
+            font-weight: 600;
+            letter-spacing: 0.35px;
+            text-transform: uppercase;
+        }
+
+        /* --- Data broker: feeds, key entry, contacts ------------------------- */
+
+        .partner-feeds {
+            display: grid;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+        .partner-feed {
+            padding: 13px 14px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.025);
+        }
+        .partner-feed-head {
+            display: flex;
+            align-items: center;
+            gap: 9px;
+            margin-bottom: 6px;
+        }
+        .partner-feed-name {
+            font-size: 12.5px;
+            font-weight: 600;
+        }
+        .partner-feed-summary {
+            margin: 0 0 6px;
+            font-size: 12px;
+            color: #cfd4db;
+        }
+        .partner-feed-detail {
+            margin: 0;
+            max-width: 72ch;
+            font-size: 11.5px;
+            line-height: 1.55;
+            color: #8f959d;
+        }
+
+        .partner-panel {
+            margin-top: 20px;
+            padding-top: 18px;
+            border-top: 1px solid rgba(255, 255, 255, 0.09);
+        }
+        .partner-panel-title {
+            margin: 0 0 7px;
+            font-size: 13.5px;
+            font-weight: 600;
+        }
+        .partner-panel-lede {
+            margin: 0 0 14px;
+            max-width: 70ch;
+            font-size: 12px;
+            line-height: 1.55;
+            color: #a9b0b8;
+        }
+
+        .partner-field {
+            display: block;
+            margin-bottom: 11px;
+        }
+        .partner-field-label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 10.5px;
+            font-weight: 600;
+            letter-spacing: 0.35px;
+            text-transform: uppercase;
+            color: #8f959d;
+        }
+        .partner-input {
+            width: 100%;
+            max-width: 460px;
+            padding: 8px 10px;
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            border-radius: 5px;
+            background: #14161a;
+            color: #e8eaed;
+            font-family: inherit;
+            font-size: 12.5px;
+        }
+        .partner-input:focus {
+            outline: none;
+            border-color: rgba(78, 201, 160, 0.55);
+        }
+        .partner-input::placeholder {
+            color: #61666d;
+        }
+
+        .partner-promises {
+            margin: 14px 0 16px;
+            padding-left: 18px;
+            max-width: 74ch;
+        }
+        .partner-promises li {
+            margin-bottom: 6px;
+            font-size: 11.5px;
+            line-height: 1.55;
+            color: #8f959d;
+        }
+
+        .partner-actions {
+            display: flex;
+            gap: 9px;
+            flex-wrap: wrap;
+        }
+
+        /* The test outcome. Coloured by state so the result is legible before the
+           sentence is read, which matters when the sentence is long. */
+        .partner-result {
+            margin: 14px 0 0;
+            padding: 10px 12px;
+            border-radius: 5px;
+            max-width: 74ch;
+            font-size: 11.5px;
+            line-height: 1.55;
+            border-left: 3px solid transparent;
+        }
+        .partner-result-running {
+            background: rgba(255, 255, 255, 0.05);
+            color: #a9b0b8;
+            border-left-color: rgba(255, 255, 255, 0.25);
+        }
+        .partner-result-ok {
+            background: rgba(78, 201, 160, 0.1);
+            color: #a8e5cd;
+            border-left-color: #4ec9a0;
+        }
+        .partner-result-denied {
+            background: rgba(224, 164, 74, 0.1);
+            color: #e8c48c;
+            border-left-color: #e0a44a;
+        }
+        .partner-result-blocked,
+        .partner-result-failed {
+            background: rgba(226, 144, 144, 0.1);
+            color: #ebb9b9;
+            border-left-color: #e29090;
+        }
+
+        .partner-contacts {
+            display: grid;
+            gap: 10px;
+        }
+        .partner-contact {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+            padding: 12px 14px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.025);
+        }
+        .partner-contact-label {
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 0.4px;
+            text-transform: uppercase;
+            color: #8f959d;
+        }
+        .partner-contact-link {
+            font-size: 13px;
+            font-weight: 500;
+        }
+        .partner-contact-note {
+            font-size: 11.5px;
+            color: #8f959d;
+        }
+
+        /* The part-built badge. Amber, between the green "available" and the
+           orange "not built yet", so it reads as its own state. */
+        .tool-badge-partial {
+            background: rgba(138, 180, 248, 0.16);
+            color: #8ab4f8;
+        }
+        /* The companion flag on the proposal header. Amber rather than green,
+           since it is telling the reader "you cannot change this", not "this is
+           fine". */
+        .tools-study-flag-builtin {
+            background: rgba(138, 180, 248, 0.15);
+            color: #8ab4f8;
+        }
+
+        /* --- Plotting (inside the Tools page's "Plot your data" block) ------- */
+
+        /* The panels sit inside a tool block, which already provides the outer
+           frame, so they carry only a rule between them rather than a full box
+           each — nested borders would read as a box inside a box. */
+        .plot-panel {
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid rgba(255, 255, 255, 0.09);
+        }
+        .plot-warning {
+            margin-bottom: 4px;
+        }
+        .plot-panel-head {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+        }
+        .plot-panel-title {
+            margin: 0;
+            font-size: 14.5px;
+            font-weight: 600;
+        }
+        .plot-panel-note {
+            margin: 0 0 6px;
+            max-width: 68ch;
+            font-size: 12px;
+            line-height: 1.55;
+            color: #a9b0b8;
+        }
+        .plot-panel-format {
+            margin: 0 0 14px;
+            font-size: 10.5px;
+            letter-spacing: 0.3px;
+            text-transform: uppercase;
+            color: #6f757d;
+        }
+        .plot-panel-body {
+            min-width: 0;
+        }
+
+        .plot-svg {
+            display: block;
+            width: 100%;
+            max-width: 640px;
+            height: auto;
+            margin: 0 auto;
+        }
+        .plot-grid {
+            stroke: rgba(255, 255, 255, 0.08);
+            stroke-width: 1;
+        }
+        .plot-axis-label {
+            fill: #8f959d;
+            font-size: 10px;
+            font-family: inherit;
+        }
+        .plot-axis-title {
+            fill: #6f757d;
+            font-size: 10.5px;
+            font-family: inherit;
+        }
+        .plot-radar-ring {
+            fill: none;
+            stroke: rgba(255, 255, 255, 0.08);
+            stroke-width: 1;
+        }
+        .plot-radar-ring-outer {
+            fill: none;
+            stroke: rgba(255, 255, 255, 0.16);
+            stroke-width: 1;
+        }
+        .plot-radar-spoke {
+            stroke: rgba(255, 255, 255, 0.07);
+            stroke-width: 1;
+        }
+
+        .plot-legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 14px;
+            margin: 18px 0 0;
+        }
+        .plot-legend-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11.5px;
+            color: #b8bec6;
+        }
+        .plot-legend-swatch {
+            width: 11px;
+            height: 3px;
+            border-radius: 2px;
+        }
+
+        /* --- Plotting page: table -------------------------------------------- */
+
+        /* Scrolls horizontally rather than squeezing columns, so a narrow window
+           cannot make the numbers unreadable. */
+        .plot-table-wrap {
+            overflow-x: auto;
+            border: 1px solid rgba(255, 255, 255, 0.09);
+            border-radius: 6px;
+        }
+        .plot-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+        .plot-table th,
+        .plot-table td {
+            padding: 7px 12px;
+            text-align: left;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+            white-space: nowrap;
+        }
+        .plot-table tbody tr:last-child td {
+            border-bottom: 0;
+        }
+        .plot-table td {
+            color: #cfd4db;
+        }
+        .plot-sort {
+            padding: 0;
+            border: 0;
+            background: transparent;
+            color: #8f959d;
+            font-family: inherit;
+            font-size: 10.5px;
+            font-weight: 600;
+            letter-spacing: 0.4px;
+            text-transform: uppercase;
+            cursor: pointer;
+        }
+        .plot-sort:hover {
+            color: #cfd4db;
+        }
+        /* The sorted column is marked, since with only one indicator the table
+           otherwise gives no clue which column is driving the order. */
+        .plot-sort.is-active {
+            color: #4ec9a0;
+        }
+        .plot-sort.is-active::after {
+            content: ' \25BE';
+        }
+        .plot-sort.is-active[aria-sort='ascending']::after {
+            content: ' \25B4';
+        }
+        .plot-table-footer {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-top: 10px;
+        }
+        .plot-table-count {
+            font-size: 11.5px;
+            color: #8f959d;
+        }
+        .tools-study-body {
+            padding: 4px 14px 14px;
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .tools-study-hint {
+            margin: 12px 0 12px;
+            font-size: 11.5px;
+            line-height: 1.5;
+            color: #8f959d;
+        }
+        .tools-study-actions {
+            display: flex;
+            justify-content: flex-end;
+            margin-top: 14px;
+            padding-top: 12px;
+            border-top: 1px solid rgba(255, 255, 255, 0.07);
+        }
+
+        /* --- One quality slot ------------------------------------------------ */
+
+        .tools-quality {
+            padding: 11px 0;
+            border-top: 1px solid rgba(255, 255, 255, 0.055);
+        }
+        .tools-quality:first-of-type {
+            border-top: 0;
+        }
+        .tools-quality-head {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 6px;
+        }
+        .tools-quality-name {
+            font-size: 12.5px;
+            font-weight: 600;
+            color: #dfe3e8;
+        }
+        .tools-quality-meta {
+            flex: none;
+            font-size: 10.5px;
+            color: #767c84;
+        }
+        .tools-quality-status {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 7px;
+            font-size: 11.5px;
+            color: #b8bec6;
+        }
+        .tools-dot {
+            flex: none;
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+        }
+        .tools-dot-idle {
+            background: rgba(255, 255, 255, 0.2);
+        }
+        .tools-dot-ok {
+            background: #4ec9a0;
+        }
+        .tools-dot-bad {
+            background: #dc5a5a;
+        }
+        .tools-muted {
+            color: #767c84;
+        }
+        .tools-reject {
+            color: #e29090;
+        }
+        .tools-check {
+            margin: 6px 0 0;
+            font-size: 11px;
+            line-height: 1.5;
+        }
+        .tools-check-ok {
+            color: #7fb9a2;
+        }
+        .tools-check-bad {
+            color: #e29090;
+        }
+        .tools-check-warn {
+            color: #d8a860;
+        }
+        .tools-picker {
+            position: relative;
+            margin-top: 9px;
+        }
+
     </style>
 </head>
 <body>
@@ -1089,8 +2258,29 @@
         <div class="cases-foot" id="casesFoot"></div>
     </section>
 
+    <!--
+        ================= Tools view ===================
+        A working surface rather than a place or a document: it takes over the
+        viewport like the case-studies picker. The cards are generated by
+        src/toolsView.js from a single declared list, so what the page offers and
+        what it says it offers cannot drift apart.
+    -->
+    <section id="toolsView" aria-label="Tools" hidden></section>
+
     <!-- ================= Right parameter panel =================== -->
     <aside id="paramPanel" aria-label="Page parameters and legend">
+        <!--
+            Collapse toggle. Always the first child, and the only one left visible
+            when the panel is collapsed, so the panel becomes its own pull-handle
+            on the screen edge. Tapping the collapsed panel also toggles it (see
+            initializePanelCollapse), so the arrow is a target rather than the
+            target on a phone.
+        -->
+        <button type="button" id="panelToggleBtn" aria-controls="paramPanel" aria-expanded="true"
+                aria-label="Hide the parameter panel">
+            <span class="panel-toggle-icon" aria-hidden="true">»</span>
+            <span class="panel-toggle-label" aria-hidden="true">Parameters</span>
+        </button>
         <div class="param-scope" id="paramPanelScope"></div>
         <div class="param-title" id="paramPanelTitle">Loading…</div>
         <div class="param-placeholder" id="paramPanelPlaceholder" style="display: none;"></div>
@@ -1143,22 +2333,6 @@
         </div>
 
         <!-- Section: overlap opacity -->
-        <div class="param-section" data-section-id="overlap-opacity">
-            <div class="param-section-title">Overlay read-out</div>
-            <label class="param-row">
-                <input type="checkbox" id="overlapFlowOnly">
-                <span>Flow only</span>
-            </label>
-            <label class="param-row">
-                <input type="checkbox" id="overlapHeatOnly">
-                <span>Heat only</span>
-            </label>
-            <div class="param-help">
-                Layers stay on together for comparison. Hover is disabled here —
-                click a link to inspect it without cluttering the overlay.
-            </div>
-        </div>
-
         <!-- Section: flow legend -->
         <div class="param-section" data-section-id="legend-flow">
             <div class="param-section-title">Pedestrian flow</div>
@@ -1316,6 +2490,54 @@
                 <div class="toc-empty">Open the document to build the contents.</div>
             </nav>
         </div>
+
+        <!-- Section: contents of the Tools page.
+             A second TOC rather than reusing the document's: the two are never
+             visible together (the Tools page is a viewport takeover, like the
+             document), and keeping them separate means neither has to reason
+             about which mode the other is in. Filled by toolsView.js after every
+             render, so it lists the blocks that are actually on the page. -->
+        <div class="param-section param-toc-dark" data-section-id="tools-toc">
+            <div class="param-section-title">Tools</div>
+            <nav class="toc-nav" id="toolsToc" aria-label="Tools page contents">
+                <div class="toc-empty">Open the tools page to build the contents.</div>
+            </nav>
+        </div>
+
+        <!-- Section: model validity.
+             One block per assessment page, placed after the page's own legend
+             and method sections so the reader has already seen the result and
+             how it was produced, and then finds out how far to trust it.
+             The rating is on the header row so it survives folding; the
+             justification and references fold away because they are long.
+             Wired generically via [data-page-section] like every other section,
+             so no registry change is needed to add a page. -->
+        <div class="param-section" data-section-id="validity">
+            <div class="validity-head param-accordion" data-fold-key="validity" aria-expanded="false">
+                <span class="validity-label">
+                    Model validity
+                    <span class="validity-rating" id="validityRating" data-level="medium">
+                        <span class="dot"></span><span id="validityRatingText">Medium</span>
+                    </span>
+                </span>
+                <span class="chevron">▶</span>
+            </div>
+            <div class="param-fold" id="validityFold">
+                <div class="param-help">
+                    Confidence in this layer as a design-stage indicator — not a
+                    measurement-grade result. See the notes below for what was
+                    validated and how.
+                </div>
+                <div class="validity-basis" id="validityBasis"></div>
+                <ul class="validity-refs" id="validityRefs"></ul>
+            </div>
+        </div>
+
+        <!-- Section: tools info (Tools page).
+             The page itself explains each block, so the panel carries only the
+             contents list. The explainer prose that used to sit here repeated
+             what the page already says under each heading, which meant reading
+             it twice to learn it once. -->
 
         <!-- ============ Global legends (shared across all pages) ============ -->
         <!-- Wrapped so the page controller can hide the whole block at once on
@@ -1737,14 +2959,127 @@
         }
         window.restorePanelFolds = restorePanelFolds;
 
+        // ---- Collapse the right parameter panel ----
+        // Desktop default is expanded; a phone's default is collapsed and comes
+        // from the media query, not from here, so the first paint is already
+        // correct. This only handles the user's own choice, which is remembered
+        // for the session and overrides the media-query default in both
+        // directions.
+        const PANEL_COLLAPSE_KEY = 'pedmodel.panelCollapsed';
+
+        function isNarrowScreen() {
+            try { return window.matchMedia('(max-width: 720px)').matches; } catch (_) { return false; }
+        }
+
+        /** The collapsed state the user last chose, or null if they never have. */
+        function savedPanelCollapse() {
+            try {
+                const raw = sessionStorage.getItem(PANEL_COLLAPSE_KEY);
+                return raw === null ? null : raw === '1';
+            } catch (_) { return null; }
+        }
+
+        /**
+         * Apply the user's saved choice to <body>.
+         *
+         * Uses explicit classes rather than relying on the media query alone, so
+         * that expanding the panel on a phone is possible — the media query only
+         * supplies the *default* while the user has expressed no preference.
+         */
+        function restorePanelCollapse() {
+            const saved = savedPanelCollapse();
+            if (saved === null) return; // media query decides
+            document.body.classList.toggle('panel-collapsed', saved);
+            // Marked separately from .panel-collapsed: on a narrow screen the
+            // media query otherwise keeps re-collapsing, and on a wide screen
+            // this flag is what stops it from overriding an explicit choice.
+            document.body.classList.toggle('panel-expanded-by-user', !saved);
+            syncPanelToggle();
+        }
+
+        function setPanelCollapsed(collapsed, { remember = true } = {}) {
+            document.body.classList.toggle('panel-collapsed', collapsed);
+            document.body.classList.toggle('panel-expanded-by-user', !collapsed);
+            if (remember) {
+                try {
+                    sessionStorage.setItem(PANEL_COLLAPSE_KEY, collapsed ? '1' : '0');
+                } catch (_) { /* ignore */ }
+            }
+            syncPanelToggle();
+            // Cesium sizes its canvas to the container, which just changed. It
+            // listens for window resizes, not for its own box changing, so
+            // without this the globe keeps the old (wider) drawing surface and
+            // the right-hand strip is clipped.
+            try { window.dispatchEvent(new Event('resize')); } catch (_) { /* ignore */ }
+        }
+
+        /** Point the arrow and the label at what the button will do next. */
+        function syncPanelToggle() {
+            const btn = document.getElementById('panelToggleBtn');
+            if (!btn) return;
+            const collapsed = isPanelCollapsed();
+            const icon = btn.querySelector('.panel-toggle-icon');
+            if (icon) icon.textContent = collapsed ? '«' : '»';
+            btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+            btn.setAttribute(
+                'aria-label',
+                collapsed ? 'Show the parameter panel' : 'Hide the parameter panel'
+            );
+        }
+
+        /** Whether the panel is currently collapsed, however that came about. */
+        function isPanelCollapsed() {
+            if (document.body.classList.contains('panel-collapsed')) return true;
+            if (document.body.classList.contains('panel-expanded-by-user')) return false;
+            return isNarrowScreen();
+        }
+
+        function initializePanelCollapse() {
+            const btn = document.getElementById('panelToggleBtn');
+            const panel = document.getElementById('paramPanel');
+            if (!btn || !panel) return;
+
+            btn.addEventListener('click', (e) => {
+                // The panel itself is also clickable while collapsed, so stop the
+                // button's own click from being handled twice on the way up.
+                e.stopPropagation();
+                setPanelCollapsed(!isPanelCollapsed());
+            });
+
+            // While collapsed the whole panel is the handle, which is a much
+            // bigger target than the arrow on a touch screen.
+            panel.addEventListener('click', () => {
+                if (isPanelCollapsed()) setPanelCollapsed(false);
+            });
+
+            restorePanelCollapse();
+            syncPanelToggle();
+
+            // Crossing the breakpoint (rotating a phone, resizing a window)
+            // should pick up the new default, unless the user has chosen.
+            try {
+                window.matchMedia('(max-width: 720px)').addEventListener('change', () => {
+                    if (savedPanelCollapse() === null) {
+                        syncPanelToggle();
+                        window.dispatchEvent(new Event('resize'));
+                    }
+                });
+            } catch (_) { /* older browsers: no live breakpoint updates */ }
+        }
+
+        window.initializePanelCollapse = initializePanelCollapse;
+        window.setPanelCollapsed = setPanelCollapsed;
+
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', () => {
                 setTimeout(initializeDraggablePanels, 100);
                 setTimeout(restorePanelFolds, 120);
+                setTimeout(initializePanelCollapse, 130);
             });
         } else {
             setTimeout(initializeDraggablePanels, 100);
             setTimeout(restorePanelFolds, 120);
+            setTimeout(initializePanelCollapse, 130);
         }
     </script>
     <script type="module" src="main.js"></script>

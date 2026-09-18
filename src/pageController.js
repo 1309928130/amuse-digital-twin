@@ -5,7 +5,7 @@
 
 import { getViewer } from './cesiumViewer.js';
 import { PAGES, PAGE_GROUPS, DEFAULT_PAGE_ID, getPage } from './pageConfig.js';
-import { NETWORK_FLOW_JSON, PEDESTRIAN_DEMAND_JSON } from './pedFlowVisualization.js';
+import { resolveExistingPath } from './dataRegistry.js';
 import { loadLargeModel, removeLargeModel } from './largeModelLoader.js';
 import { toggleGrasshopperHeat } from './heatmapVisualization.js';
 import { toggleSunlightAnalysis } from './sunlightVisualization.js';
@@ -22,6 +22,7 @@ import {
 } from './cfdVisualization.js';
 import { LARGE_MODEL_CONFIG } from './config.js';
 import { initializeDocView, openDoc, closeDoc } from './docView.js';
+import { initializeToolsView, openTools, closeTools } from './toolsView.js';
 import {
     initializeCaseStudies,
     setCaseStudiesVisible,
@@ -385,7 +386,14 @@ async function hydratePanelLegends() {
     }
 
     try {
-        const res = await fetch('./simulation_data/pedflow_manifest.json', { cache: 'no-store' });
+        // The manifest describes the flow and demand files, so it belongs to the
+        // proposal those files came from. Resolved like any other data, which
+        // means an upload can supply its own.
+        const manifestUrl = (await resolveExistingPath('flow')) || '';
+        const manifestPath = manifestUrl
+            ? `${manifestUrl.slice(0, manifestUrl.lastIndexOf('/'))}/pedflow_manifest.json`
+            : './simulation_data/pedflow_manifest.json';
+        const res = await fetch(manifestPath, { cache: 'no-store' });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const manifest = await res.json();
 
@@ -406,8 +414,6 @@ async function hydratePanelLegends() {
 
     // Heat legend uses the colours found in the CSV, which is only known after load;
     // the page controller keeps the reserved blue→red ramp as a fallback.
-    void NETWORK_FLOW_JSON;
-    void PEDESTRIAN_DEMAND_JSON;
 
     // CFD legends: fill the cap actually used by the renderer so the panel
     // numbers cannot drift away from what is drawn.
@@ -429,6 +435,93 @@ async function hydratePanelLegends() {
     }
 }
 
+/**
+ * Fill the model-validity section for a page.
+ *
+ * The section is a single shared block rather than one per page: it is wired
+ * through the ordinary `sections` list as `'validity'`, and the content is
+ * swapped here. That keeps the justification text next to the page definition
+ * in `pageConfig.js` instead of splitting it across the markup.
+ *
+ * The rating stays on the header row so it is readable while the evidence is
+ * folded; the prose and references live in the fold. A page with no `validity`
+ * entry simply does not list the section, and gets no rating rather than a
+ * default one — an unearned "Medium" would be worse than saying nothing.
+ *
+ * @param {import('./pageConfig.js').PageDef} page
+ */
+function applyValiditySection(page) {
+    const section = document.querySelector('[data-page-section~="validity"]')
+        || document.querySelector('#paramPanel [data-section-id="validity"]');
+    if (!section) return;
+
+    const validity = page.validity;
+    if (!validity) {
+        section.style.display = 'none';
+        return;
+    }
+    section.style.display = '';
+
+    const rating = document.getElementById('validityRating');
+    const level = String(validity.rating || 'medium').toLowerCase();
+    if (rating) {
+        rating.dataset.level = level;
+        const text = document.getElementById('validityRatingText');
+        if (text) text.textContent = level.charAt(0).toUpperCase() + level.slice(1);
+    }
+
+    const basis = document.getElementById('validityBasis');
+    if (basis) basis.textContent = validity.basis || '';
+
+    const refs = document.getElementById('validityRefs');
+    if (refs) {
+        const list = Array.isArray(validity.refs) ? validity.refs : [];
+        refs.textContent = '';
+        refs.style.display = list.length ? '' : 'none';
+        list.forEach((entry) => {
+            const li = document.createElement('li');
+            // Refs are authored as `Author (Year) *Journal title*`. The only
+            // markup they use is italics for the source title, so it is applied
+            // here rather than by injecting HTML — the text is still set as
+            // text nodes, so a stray `<` in a title can never become markup.
+            const parts = String(entry).split(/\*([^*]+)\*/);
+            parts.forEach((part, i) => {
+                if (!part) return;
+                if (i % 2 === 1) {
+                    const em = document.createElement('em');
+                    em.textContent = part;
+                    li.appendChild(em);
+                } else {
+                    li.appendChild(document.createTextNode(part));
+                }
+            });
+            refs.appendChild(li);
+        });
+    }
+
+    // A page with a short justification has nothing to hide, so open it rather
+    // than making the reader click for one line.
+    const fold = document.getElementById('validityFold');
+    const head = section.querySelector('.validity-head');
+    if (fold && head) {
+        const long = (validity.basis || '').length > 220 || (validity.refs || []).length > 0;
+        const saved = readFoldState('validity');
+        const open = saved === null ? !long : saved;
+        fold.classList.toggle('open', open);
+        head.setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
+}
+
+/** Read a saved accordion state, or `null` when the reader has never set one. */
+function readFoldState(key) {
+    try {
+        const raw = sessionStorage.getItem(`pedmodel.panelFold.${key}`);
+        return raw === null ? null : raw === '1';
+    } catch (_) {
+        return null;
+    }
+}
+
 /** Show the parameter-panel sections declared by a page, hide the rest. */
 function applyPanelSections(page) {
     // Document pages keep the panel, but repurposed: instead of legends it
@@ -441,13 +534,19 @@ function applyPanelSections(page) {
         panel.classList.toggle('panel-light', docPage);
     }
     document.body.classList.toggle('doc-page-active', docPage);
+    // The tools page is a working surface over the dark theme, matching the
+    // case-studies picker, so it takes neither the document's light theme nor
+    // that page's body flag.
     document.body.classList.toggle('cases-page-active', !!page.cases);
+    document.body.classList.toggle('tools-page-active', !!page.tools);
 
     // Global legends toggle scene layers and vehicles, none of which exist on a
-    // reading page or the proposal picker — on those the panel carries only
-    // page-specific controls.
+    // reading page, the proposal picker, or the tools view — on those the panel
+    // carries only page-specific content.
     const globalBlock = document.getElementById('globalLegendsBlock');
-    if (globalBlock) globalBlock.style.display = docPage || page.cases ? 'none' : '';
+    if (globalBlock) {
+        globalBlock.style.display = docPage || page.cases || page.tools ? 'none' : '';
+    }
 
     const sections = document.querySelectorAll('#paramPanel [data-page-section]');
     sections.forEach((el) => {
@@ -476,6 +575,11 @@ function applyPanelSections(page) {
             placeholder.style.display = 'none';
         }
     }
+
+    // Runs after the generic pass above: the validity section is listed in
+    // `page.sections` like any other, so it has already been hidden or shown,
+    // and this only fills it in (and re-hides it for pages with no entry).
+    applyValiditySection(page);
 }
 
 /**
@@ -607,6 +711,8 @@ export async function gotoPage(pageId, options = {}) {
             await openDoc({ source: page.doc.source, title: page.doc.title || page.title });
         } else if (page.cases) {
             setCaseStudiesVisible(true);
+        } else if (page.tools) {
+            openTools();
         }
         return;
     }
@@ -629,14 +735,20 @@ export async function gotoPage(pageId, options = {}) {
     // awaits the heavy models (the sunlight GLB in particular), and hiding the
     // picker only afterwards left it sitting over the newly opened page for
     // several seconds.
+    //
+    // Every overlay is closed first, then the one this page wants is opened:
+    // the branches are exclusive, and spelling it out this way means adding a
+    // fourth takeover page cannot forget to dismiss one of the others.
+    closeDoc();
+    setCaseStudiesVisible(false);
+    closeTools();
+
     if (page.doc) {
-        setCaseStudiesVisible(false);
+        await openDoc({ source: page.doc.source, title: page.doc.title || page.title });
     } else if (page.cases) {
-        closeDoc();
         setCaseStudiesVisible(true);
-    } else {
-        closeDoc();
-        setCaseStudiesVisible(false);
+    } else if (page.tools) {
+        openTools();
     }
 
     await applyPageLayers(page);
@@ -698,6 +810,7 @@ export async function initializePages(navEl) {
     await hydratePanelLegends();
 
     initializeDocView();
+    initializeToolsView();
 
     // Restore the last chosen design proposal before the first page applies its
     // layers, so the initial render already reflects the saved study.

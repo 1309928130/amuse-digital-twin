@@ -3,17 +3,20 @@
  *
  * This page is not a place on the map but a choice between studies, so it takes
  * over the viewport the same way the document view does. The card grid is built
- * from `PROPOSALS` in `pageConfig.js`, which is the single source of truth for
- * what proposals exist and which of them has data behind it.
+ * from `dataRegistry.getStudyList()`, which combines the built-in `PROPOSALS`
+ * from `pageConfig.js` with any proposal the visitor added on the Tools page, and
+ * is therefore the single source of truth for what proposals exist and which of
+ * them has data behind it.
  *
  * Selecting a card publishes the choice on `#caseStudyState`, where the page
- * controller reads it when applying a page's layers. Only one proposal has
- * assessment data today, so a selection that cannot be honoured is reported
- * back to the user rather than silently rendering the default study's results
- * under another proposal's name.
+ * controller reads it when applying a page's layers. Only Proposal 1 and any
+ * proposal with uploads have data, so a selection that cannot be honoured is
+ * reported back to the user rather than silently rendering the default study's
+ * results under another proposal's name.
  */
 
 import { PROPOSALS, DEFAULT_PROPOSAL_ID, resolveStudy, getCaseStudyPages } from './pageConfig.js';
+import { onDataRegistryChange } from './dataRegistry.js';
 /** Currently requested study id (may name a proposal with no data). */
 let requestedId = DEFAULT_PROPOSAL_ID;
 
@@ -25,6 +28,39 @@ let onStudyChange = null;
 
 /** Callback invoked when a quality-page card is clicked. */
 let onOpenPage = null;
+
+/**
+ * The proposals to show in the picker: the built-in three plus anything the
+ * visitor added on the Tools page.
+ *
+ * Visitor-added studies have no artwork of their own, so they borrow the first
+ * proposal's thumbnail. Showing a picture that is not literally theirs is a
+ * compromise, but a card with a broken image would read as a bug, and the name
+ * and "No data / Data available" badge are what the picker is actually for.
+ *
+ * @returns {Array<{id: string, label: string, note: string, thumbnail: string, hasData: boolean}>}
+ */
+function getCaseStudyProposals() {
+    const registry = typeof window !== 'undefined' ? window.__dataRegistry : null;
+    if (!registry) return PROPOSALS;
+
+    const fallbackThumb = PROPOSALS[0]?.thumbnail || './cases/proposal1.png';
+    const builtInIds = new Set(PROPOSALS.map((p) => p.id));
+
+    return registry.getStudyList().map((study) => {
+        if (builtInIds.has(study.id)) {
+            const original = PROPOSALS.find((p) => p.id === study.id);
+            return { ...original, hasData: registry.studyHasData(study.id) };
+        }
+        return {
+            id: study.id,
+            label: study.label,
+            note: study.note,
+            thumbnail: fallbackThumb,
+            hasData: registry.studyHasData(study.id),
+        };
+    });
+}
 
 /**
  * Build one proposal card.
@@ -175,20 +211,24 @@ function render() {
         card.setAttribute('aria-pressed', isActive ? 'true' : 'false');
     });
 
-    const proposal = PROPOSALS.find((p) => p.id === study.requested);
+    // Looked up across every study, not just the built-in ones, so the footer
+    // can name a proposal the visitor added by upload.
+    const proposal = getCaseStudyProposals().find((p) => p.id === study.requested);
+    const label = proposal ? proposal.label : study.requested;
     const foot = document.getElementById('casesFoot');
     if (foot) {
         if (study.substituted) {
             // Honest about what is on screen: the picker selection stands, but
             // the assessment pages behind it have no results of their own yet.
             foot.innerHTML =
-                `<b>${proposal ? proposal.label : study.requested}</b> has no assessment data yet, ` +
+                `<b>${label}</b> has no assessment data yet, ` +
                 'so the pages above are empty rather than showing another proposal’s results. ' +
-                'Run the assessments and add them under <code>simulation_data/' +
+                'Add results to it on the <b>Tools</b> page, or run the assessments and add ' +
+                'them under <code>simulation_data/' +
                 `${study.requested}/</code> to fill them in.`;
         } else {
             foot.innerHTML =
-                `<b>${proposal ? proposal.label : study.effective}</b> is the active study. ` +
+                `<b>${label}</b> is the active study. ` +
                 'Every assessment page reads its datasets.';
         }
     }
@@ -251,21 +291,39 @@ export function initializeCaseStudies(options = {}) {
     const grid = document.getElementById('casesGrid');
     if (!grid) return;
 
+    // The listener is attached once, but the cards are rebuilt on every change
+    // to the registry: a proposal added on the Tools page has to appear here, and
+    // so does the "Data available" badge once its first file is uploaded.
     if (!grid.dataset.wired) {
-        PROPOSALS.forEach((proposal) => grid.appendChild(buildCard(proposal)));
-
         grid.addEventListener('click', (event) => {
             const card = event.target.closest('.case-card');
             if (!card) return;
             requestedId = card.dataset.proposalId;
             render();
         });
-
         grid.dataset.wired = 'true';
+
+        onDataRegistryChange(() => {
+            // A study may have been removed while it was the requested one, in
+            // which case fall back rather than render a study that is gone.
+            const ids = getCaseStudyProposals().map((p) => p.id);
+            if (!ids.includes(requestedId)) requestedId = DEFAULT_PROPOSAL_ID;
+            rebuildPicker();
+            render();
+        });
     }
 
+    rebuildPicker();
     renderedStudy = null;
     render();
+}
+
+/** Replace every proposal card with the current study list. */
+function rebuildPicker() {
+    const grid = document.getElementById('casesGrid');
+    if (!grid) return;
+    grid.innerHTML = '';
+    getCaseStudyProposals().forEach((proposal) => grid.appendChild(buildCard(proposal)));
 }
 
 /**

@@ -17,7 +17,7 @@ let ghHeatDataSource = null;
 let ghHeatPolylineCollection = null;
 
 /** Default Grasshopper heat CSV (WGS84), relative to visualization/ */
-export const GH_HEAT_CSV_PATH = './simulation_data/simulation_results_heat_wgs84.csv';
+import { resolveExistingPath } from './dataRegistry.js';
 
 /**
  * Display scale: CSV vectors are ~4 m; Rhino Vector Display looks longer.
@@ -162,7 +162,7 @@ function hideUrbanHeatLegend() {
  * @param {string} csvPath
  * @param {{ flyTo?: boolean }} [options] - flyTo defaults false (keeps saved camera)
  */
-export async function loadGrasshopperHeat(csvPath = GH_HEAT_CSV_PATH, options = {}) {
+export async function loadGrasshopperHeat(csvPath, options = {}) {
     const viewer = getViewer();
     clearGrasshopperHeat();
 
@@ -298,7 +298,10 @@ export function clearGrasshopperHeat() {
 
 export function toggleGrasshopperHeat(show, options = {}) {
     if (show && !ghHeatEnabled) {
-        return loadGrasshopperHeat(GH_HEAT_CSV_PATH, options);
+        // Resolved for the active study: a proposal may ship its own heat grid.
+        return resolveExistingPath('heat').then((url) =>
+            url ? loadGrasshopperHeat(url, options) : Promise.resolve()
+        );
     }
     if (!show && ghHeatEnabled) {
         clearGrasshopperHeat();

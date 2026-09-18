@@ -24,8 +24,10 @@ if (!Cesium) {
     console.error('[cfd] Cesium global is not available — check the CDN script tag.');
 }
 
-const WIND_URL = './simulation_data/wind/wind_field.json';
-const POLLUTION_URL = './simulation_data/pollution/pollution_field.json';
+// Wind and pollution fields are resolved per active study rather than from a
+// fixed path, so a proposal's own CFD output is used when one is selected. The
+// resolver falls back to the published files when no per-proposal data exists.
+import { candidatePaths, resolveExistingPath } from './dataRegistry.js';
 
 /** Plausible wind cap, m/s. Above this the solver output is not trustworthy. */
 const SPEED_CAP = 15;
@@ -74,8 +76,33 @@ const ARROW_HEIGHT_LIFT = 40;
 // State
 // ---------------------------------------------------------------------------
 
-/** @type {{wind: object|null, pollution: object|null}} */
-const cache = { wind: null, pollution: null };
+/**
+ * Memoised field data, keyed by the URL it was loaded from rather than by
+ * `kind`.
+ *
+ * Keying by kind was correct when there was one wind file and one pollution
+ * file. Now that a proposal supplies its own, the same kind can refer to
+ * different data, and a kind-keyed cache would keep serving the previous
+ * proposal's field after the user switched studies.
+ *
+ * @type {Map<string, object>}
+ */
+const cache = new Map();
+
+/**
+ * The URL each kind is currently drawing from.
+ *
+ * Recorded at load time rather than inferred from the cache keys, because an
+ * uploaded file is served from a blob URL that carries no hint of what it holds
+ * — `blob:http://…/<uuid>` — so searching the keys for "wind" finds nothing and
+ * the stats and legend numbers would silently go missing for uploaded data.
+ *
+ * Declared beside `cache` because `loadField` writes it: a `const` further down
+ * the module would be in the temporal dead zone at that call site.
+ *
+ * @type {{wind: string|null, pollution: string|null}}
+ */
+const loadedUrl = { wind: null, pollution: null };
 
 /** @type {{collection: any, count: number}|null} */
 let windLayer = null;
@@ -104,17 +131,34 @@ let pollutionVisible = false;
 // Shared helpers
 // ---------------------------------------------------------------------------
 
-/** Fetch + memoise one of the field files. */
+/** Fetch + memoise one of the field files, resolved for the active study. */
 async function loadField(kind) {
-    if (cache[kind]) return cache[kind];
-    const url = kind === 'wind' ? WIND_URL : POLLUTION_URL;
-    const response = await fetch(url);
-    if (!response.ok) {
-        throw new Error(`Failed to load ${url}: HTTP ${response.status}`);
+    const qualityId = kind === 'wind' ? 'wind' : 'pollution';
+
+    // Walk the candidate paths so a per-proposal file is preferred but the
+    // published one still loads when no per-proposal data exists.
+    for (const url of candidatePaths(qualityId)) {
+        if (cache.has(url)) {
+            loadedUrl[kind] = url;
+            return cache.get(url);
+        }
+        try {
+            const response = await fetch(url);
+            if (!response.ok) continue;
+            const data = await response.json();
+            cache.set(url, data);
+            // Remembered so the stats and legend helpers know which entry the
+            // layer is drawing from; a blob URL gives them no other clue.
+            loadedUrl[kind] = url;
+            return data;
+        } catch (_) {
+            /* try the next candidate */
+        }
     }
-    const data = await response.json();
-    cache[kind] = data;
-    return data;
+
+    throw new Error(
+        `No ${qualityId} field found for the active study (tried: ${candidatePaths(qualityId).join(', ')})`
+    );
 }
 
 /**
@@ -305,8 +349,21 @@ export function isWindFieldVisible() {
     return windVisible;
 }
 
+/**
+ * The data last loaded for a kind, for the stats and legend helpers.
+ *
+ * Returns null rather than throwing when nothing is loaded, which is what the
+ * callers already expect before a layer has been switched on.
+ */
+function cachedField(kind) {
+    const url = loadedUrl[kind];
+    if (!url) return null;
+    return cache.get(url) || null;
+}
+
 export function getWindFieldStats() {
-    return cache.wind ? cache.wind.stats : null;
+    const field = cachedField('wind');
+    return field ? field.stats : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -443,31 +500,34 @@ export function isPollutionFieldVisible() {
 }
 
 export function getPollutionFieldStats() {
-    return cache.pollution ? cache.pollution.stats : null;
+    const field = cachedField('pollution');
+    return field ? field.stats : null;
 }
 
 /** Metadata for the right-hand panel (source, case, counts, units). */
 export function getCfdMetadata() {
+    const wind = cachedField('wind');
+    const pollution = cachedField('pollution');
     return {
-        wind: cache.wind
+        wind: wind
             ? {
-                  case: cache.wind.case,
-                  time: cache.wind.time,
-                  units: cache.wind.units,
-                  count: cache.wind.count,
-                  inletSpeed: cache.wind.inletSpeed,
-                  suspectCount: cache.wind.suspectCount,
-                  stats: cache.wind.stats,
+                  case: wind.case,
+                  time: wind.time,
+                  units: wind.units,
+                  count: wind.count,
+                  inletSpeed: wind.inletSpeed,
+                  suspectCount: wind.suspectCount,
+                  stats: wind.stats,
               }
             : null,
-        pollution: cache.pollution
+        pollution: pollution
             ? {
-                  case: cache.pollution.case,
-                  time: cache.pollution.time,
-                  units: cache.pollution.units,
-                  count: cache.pollution.count,
-                  stats: cache.pollution.stats,
-                  note: cache.pollution.note,
+                  case: pollution.case,
+                  time: pollution.time,
+                  units: pollution.units,
+                  count: pollution.count,
+                  stats: pollution.stats,
+                  note: pollution.note,
               }
             : null,
     };

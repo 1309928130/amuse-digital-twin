@@ -114,34 +114,76 @@ function addHeadingAnchors(container) {
 }
 
 /**
- * Build the table of contents from the rendered headings.
+ * Every TOC on the page, so the shared click and scroll handlers can find the
+ * right target without each caller passing its own.
  *
- * The TOC lives in the right parameter panel rather than inside the document,
- * so it stays put while the reader scrolls. It is derived from the same
- * headings the document was rendered from, which means it can never describe a
- * section that is not there.
+ * A registry rather than closures on the elements: `openDoc` rebuilds its TOC on
+ * every navigation and the Tools page rebuilds its own on every render, and the
+ * click handler is bound once per `<nav>` to avoid stacking duplicates. That
+ * one-time binding needs to resolve its target at click time, which means it
+ * needs a lookup that survives rebuilds.
+ *
+ * @type {WeakMap<HTMLElement, {container: () => HTMLElement|null, scroller: () => HTMLElement|null, offset: number}>}
+ */
+const tocRegistry = new WeakMap();
+
+/**
+ * Build a table of contents from the headings inside `container`.
+ *
+ * The TOC lives in the right parameter panel rather than inside the content, so
+ * it stays put while the reader scrolls. It is derived from the same headings the
+ * content was rendered from, which means it can never describe a section that is
+ * not there. That also makes it correct for free on pages whose sections are
+ * generated at runtime.
  *
  * Headings are nested by level. `marked` does not guarantee a well-formed
- * outline (a document may jump h2 -> h4), so levels are tracked on a stack and
- * a skipped level is treated as one deeper rather than producing a broken tree.
+ * outline (a document may jump h2 -> h4), and generated markup is no more
+ * trustworthy, so levels are tracked on a stack and a skipped level is treated as
+ * one deeper rather than producing a broken tree.
  *
- * @param {HTMLElement} container The rendered article
+ * @param {HTMLElement} container The rendered content
  * @param {HTMLElement} tocEl     The <nav> to fill
  * @param {HTMLElement} scrollEl  Element that actually scrolls (for scroll-spy)
+ * @param {{offset?: number, emptyText?: string, skipSelector?: string}} [options]
  */
-function buildToc(container, tocEl, scrollEl) {
-    const all = Array.from(container.querySelectorAll('h1, h2, h3, h4, h5, h6'));
+function buildSectionToc(container, tocEl, scrollEl, options = {}) {
+    const all = Array.from(container.querySelectorAll('h1, h2, h3, h4, h5, h6')).filter(
+        // Headings inside a skipped region are excluded wholesale. Used for a
+        // page's own title block, which is not a section.
+        (h) => !options.skipSelector || !h.closest(options.skipSelector)
+    );
 
     // A lone <h1> is the document's title, not a section — listing it would
     // make the first TOC entry just repeat the page heading. Deeper headings
-    // are always kept.
+    // are always kept. Generated pages have no <h1> at all, so this is a no-op
+    // there rather than a special case.
     const headings = all.filter((h, i) => !(i === 0 && h.tagName === 'H1'));
 
     tocEl.innerHTML = '';
     if (!headings.length) {
-        tocEl.innerHTML = '<div class="toc-empty">This document has no sections.</div>';
+        tocEl.innerHTML = `<div class="toc-empty">${
+            options.emptyText || 'This page has no sections.'
+        }</div>`;
         return;
     }
+
+    // Headings need ids for the links to resolve. Generated markup usually has
+    // none, so they are assigned here, uniquely.
+    const used = new Map();
+    headings.forEach((heading) => {
+        if (heading.id) return;
+        const base =
+            (heading.textContent || '')
+                .toLowerCase()
+                .trim()
+                .replace(/[^a-z0-9\s-]/g, '')
+                .replace(/\s+/g, '-')
+                .replace(/-+/g, '-')
+                .replace(/^-|-$/g, '') || 'section';
+        const seen = used.get(base) || 0;
+        used.set(base, seen + 1);
+        heading.id = seen === 0 ? base : `${base}-${seen}`;
+    });
 
     const rootList = document.createElement('ul');
     rootList.className = 'toc-list';
@@ -199,34 +241,84 @@ function buildToc(container, tocEl, scrollEl) {
             const link = event.target.closest('a.toc-link');
             if (!link) return;
             event.preventDefault();
-            const scroller = getTocScroller();
-            const article = getTocArticle();
-            if (!scroller || !article) return;
-            const target = article.querySelector(`#${CSS.escape(link.dataset.target)}`);
-            if (!target) return;
 
-            // Scroll the document container explicitly rather than relying on
-            // `scrollIntoView`, which picks its own ancestor and lands the
-            // heading under the document bar. The small offset clears the bar.
+            // Resolved through the registry so the handler survives rebuilds and
+            // works for every TOC, not just the document's.
+            const entry = tocRegistry.get(tocEl);
+            if (!entry) return;
+            const scroller = entry.scroller();
+            const target = entry.container()?.querySelector(`#${CSS.escape(link.dataset.target)}`);
+            if (!scroller || !target) return;
+
+            // Scroll the container explicitly rather than relying on
+            // `scrollIntoView`, which picks its own ancestor and can land the
+            // heading under a fixed bar. The small offset clears it.
+            //
+            // The browser clamps this at the maximum scroll, so on a page too short
+            // to bring the target to the top the block is still reached, just not
+            // aligned. Scrolling further would not be possible anyway.
             const offset =
                 target.getBoundingClientRect().top -
                 scroller.getBoundingClientRect().top +
                 scroller.scrollTop;
-            scroller.scrollTo({ top: Math.max(0, offset - 16), behavior: 'smooth' });
+
+            scroller.scrollTo({
+                top: Math.max(0, offset - (entry.offset ?? 16)),
+                behavior: 'smooth',
+            });
         });
     }
 
-    attachTocScrollSpy(tocEl, scrollEl);
+    tocRegistry.set(tocEl, {
+        container: () => container,
+        scroller: () => scrollEl,
+        offset: options.offset,
+    });
+
+    attachTocScrollSpy(tocEl, scrollEl, container);
 }
 
-/** The document body element, resolved fresh so it survives re-renders. */
-function getTocArticle() {
-    return bodyEl ? bodyEl.querySelector('article.doc') : null;
+/**
+ * The document's own table of contents.
+ *
+ * Thin wrapper over `buildSectionToc`: the document resolves its article and
+ * scroller at call time rather than capturing them, because both are replaced as
+ * the reader navigates between documents.
+ *
+ * @param {HTMLElement} container
+ * @param {HTMLElement} tocEl
+ * @param {HTMLElement} scrollEl
+ */
+function buildToc(container, tocEl, scrollEl) {
+    buildSectionToc(container, tocEl, scrollEl, { offset: 16 });
 }
 
-/** The element that actually scrolls the document. */
-function getTocScroller() {
-    return bodyEl;
+/**
+ * Build the Tools page's contents from the blocks on that page.
+ *
+ * Exported because the blocks are generated by `toolsView.js` on every render,
+ * and a contents list that describes a previous render would be worse than none.
+ * Called after each render with whatever is currently on the page.
+ *
+ * @param {HTMLElement} container The tools view root (holds the blocks)
+ * @param {HTMLElement} tocEl     The <nav> in the right panel
+ */
+export function buildToolsToc(container, tocEl) {
+    if (!container || !tocEl) return;
+    // The page heading ("Tools") is skipped: it is the page's own name, and a
+    // contents entry pointing at the top of the page a reader is already looking
+    // at is noise. The blocks are the sections worth listing.
+    //
+    // The block headings are <h2> and the sub-parts of a block are <h4>, so
+    // <h3> is deliberately absent from this page: the level is unused, and
+    // skipping it keeps the contents list to two depths rather than inventing a
+    // middle tier that would only hold one item per block.
+    const inner = container.querySelector('.tools-inner') || container;
+    buildSectionToc(inner, tocEl, container, {
+        offset: 14,
+        emptyText: 'This page has no blocks.',
+        skipSelector: '.tools-head',
+    });
 }
 
 /**
@@ -238,9 +330,16 @@ function getTocScroller() {
  * easier to reason about than a set of observer callbacks firing out of order.
  *
  * @param {HTMLElement} tocEl
+ * @param {HTMLElement} tocEl
  * @param {HTMLElement} scrollEl
+ * @param {HTMLElement} container The content holding the headings
  */
-function attachTocScrollSpy(tocEl, scrollEl) {
+function attachTocScrollSpy(tocEl, scrollEl, container) {
+    // One spy per scroller. On the document this fires as the reader navigates
+    // between documents; on the Tools page the element is rendered repeatedly, so
+    // the previous listener is torn down before a new one is attached. Without
+    // this, every render would add another scroll listener that never fires again
+    // but keeps its captured links alive.
     if (scrollEl.__tocSpyCleanup) scrollEl.__tocSpyCleanup();
 
     const links = Array.from(tocEl.querySelectorAll('a.toc-link'));
@@ -249,25 +348,27 @@ function attachTocScrollSpy(tocEl, scrollEl) {
     const update = () => {
         queued = false;
 
-        // Resolve the article live: the cached fragment is re-inserted on each
-        // navigation, so a captured reference would point at a detached tree.
-        const article = getTocArticle();
-        if (!article) return;
+        // Resolve the content live where it can be replaced (the document's
+        // article is re-inserted on each navigation, so a captured reference
+        // would point at a detached tree). On generated pages the container is
+        // stable and this is just a normal lookup.
+        const content = container;
+        if (!content) return;
 
-        // Measure against the scroller's own viewport edge, not the article's.
-        // The article travels with the content, so using its rect made the
+        // Measure against the scroller's own viewport edge, not the content's.
+        // The content travels with the scroll, so using its rect made the
         // threshold drift as the reader scrolled and the highlight went stale.
         const viewportTop = scrollEl.getBoundingClientRect().top;
         // The threshold sits slightly below the top edge so a heading counts as
         // "current" once it has settled, not while it is still arriving.
         const threshold = viewportTop + 80;
 
-        // Only consider headings that still have a TOC entry, so the document
-        // title being excluded from the list cannot become the active row.
+        // Only consider headings that still have a TOC entry, so a heading
+        // excluded from the list cannot become the active row.
         const known = new Set(links.map((l) => l.dataset.target));
 
         let activeId = null;
-        for (const heading of article.querySelectorAll('h1, h2, h3, h4, h5, h6')) {
+        for (const heading of content.querySelectorAll('h1, h2, h3, h4, h5, h6')) {
             if (!known.has(heading.id)) continue;
             if (heading.getBoundingClientRect().top <= threshold) {
                 activeId = heading.id;
@@ -276,6 +377,24 @@ function attachTocScrollSpy(tocEl, scrollEl) {
             }
         }
         if (!activeId) activeId = links.length ? links[0].dataset.target : null;
+
+        // At the bottom of the scroll range the last section often cannot reach
+        // the threshold, because there is nothing left to scroll. Without this the
+        // last entry could never light up, so a reader parked at the foot of the
+        // page would see a highlight pointing at a section they are nowhere near.
+        // Only applied when the range is genuinely exhausted, so it cannot mask a
+        // section that is merely tall.
+        //
+        // Note this can override a clicked entry when the page is too short to
+        // bring that entry to the top: clicking the second of three blocks on a
+        // page that fits in one and a half screens parks the view where the last
+        // block is visible too, and highlighting it is the honest reading of what
+        // is on screen. The entry is still scrolled to, just not to the top.
+        const atBottom =
+            scrollEl.scrollHeight - scrollEl.clientHeight - scrollEl.scrollTop <= 2;
+        if (atBottom && links.length) {
+            activeId = links[links.length - 1].dataset.target;
+        }
 
         links.forEach((link) => {
             link.classList.toggle('is-active', link.dataset.target === activeId);

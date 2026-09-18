@@ -6,8 +6,7 @@
 import { getViewer } from './cesiumViewer.js';
 import { ZUIDAS_BOUNDS } from './config.js';
 
-export const NETWORK_FLOW_JSON = './simulation_data/network_flow_edges.json';
-export const PEDESTRIAN_DEMAND_JSON = './simulation_data/pedestrian_demand.json';
+import { resolveExistingPath } from './dataRegistry.js';
 
 let flowEnabled = false;
 let demandEnabled = false;
@@ -23,6 +22,26 @@ let tooltipEl = null;
 let highlightPrimitive = null;
 let lastHoverIdx = -1;
 let pinnedTooltip = false;
+
+/**
+ * Pending hover preview, and the link it belongs to.
+ *
+ * `hoverTimer` is the dwell countdown; `pendingHoverIdx` records which link is
+ * being waited on so that a move within the same link does not restart the
+ * countdown, while a move onto a different link does.
+ */
+let hoverTimer = null;
+let pendingHoverIdx = -1;
+
+/**
+ * Dwell time before a hover preview appears, in milliseconds.
+ *
+ * Sweeping the pointer across the flow layer passes over many links, and showing
+ * each one immediately made the tooltip flicker from link to link and read as
+ * noise rather than a response to intent. Requiring the pointer to rest first
+ * means the preview appears only for the link the user actually stopped on.
+ */
+const HOVER_DELAY_MS = 500;
 
 /** YlOrRd-like stops (matplotlib YlOrRd) */
 const YLORRD = [
@@ -290,6 +309,10 @@ function showPinnedTooltip(edge, idx, screenPosition) {
 }
 
 function detachClickHandler() {
+    // Cancelled before the handler is destroyed: otherwise a countdown started
+    // just before teardown would fire later and show a tooltip over a layer that
+    // is no longer on screen.
+    cancelPendingHover();
     if (hoverHandler) {
         try { hoverHandler.destroy(); } catch (_) { /* ignore */ }
         hoverHandler = null;
@@ -316,6 +339,12 @@ export function setFlowTooltipMode(mode) {
     if (next === tooltipMode) return;
     tooltipMode = next;
     console.log(`[Network Flow] Link tooltip mode: ${tooltipMode}`);
+    // Leaving hover mode with a preview on screen would strand a tooltip whose
+    // input action no longer exists, so it is cleared before re-attaching.
+    if (next !== 'hover') {
+        cancelPendingHover();
+        hideHoverTooltip();
+    }
     // Re-attach so the correct Cesium input actions are registered.
     if (flowEnabled) attachClickHandler();
 }
@@ -336,8 +365,45 @@ function showHoverTooltip(edge, idx, screenPosition) {
     highlightEdge(edge, idx);
 }
 
+/**
+ * Start (or continue waiting) the dwell countdown for a link.
+ *
+ * Moving within the same link must not restart the timer, or a pointer drifting
+ * a pixel would reset it and the preview would never appear. Only a move onto a
+ * *different* link cancels the pending one and begins again.
+ *
+ * `screenPosition` is captured now and not read again when the timer fires: the
+ * tooltip should appear where the pointer came to rest, not wherever it has
+ * drifted to by then.
+ */
+function scheduleHoverTooltip(edge, idx, screenPosition) {
+    if (pinnedTooltip) return;
+    if (idx === hoverIdx) return; // already shown for this link
+    if (idx === pendingHoverIdx) return; // already counting down for it
+    cancelPendingHover();
+    pendingHoverIdx = idx;
+    hoverTimer = window.setTimeout(() => {
+        hoverTimer = null;
+        pendingHoverIdx = -1;
+        // Re-checked because the layer or the page may have changed while the
+        // countdown ran, in which case the preview would be stale or unwanted.
+        if (!flowEnabled || tooltipMode !== 'hover') return;
+        showHoverTooltip(edge, idx, screenPosition);
+    }, HOVER_DELAY_MS);
+}
+
+/** Abandon a pending hover preview, if any. */
+function cancelPendingHover() {
+    if (hoverTimer !== null) {
+        window.clearTimeout(hoverTimer);
+        hoverTimer = null;
+    }
+    pendingHoverIdx = -1;
+}
+
 function hideHoverTooltip() {
     if (pinnedTooltip) return;
+    cancelPendingHover();
     hoverIdx = -1;
     const tip = ensureTooltip();
     tip.style.display = 'none';
@@ -384,22 +450,24 @@ function attachClickHandler() {
 
     if (tooltipMode !== 'hover') return;
 
-    // Hover preview: only registered on pages that ask for it
+    // Hover preview: only registered on pages that ask for it, and only after
+    // the pointer has rested on one link for HOVER_DELAY_MS.
     hoverHandler.setInputAction((movement) => {
         if (!flowEnabled) return;
         const hit = pickEdgeAt(movement.endPosition);
         if (!hit) {
+            cancelPendingHover();
             hideHoverTooltip();
             return;
         }
-        showHoverTooltip(hit.edge, hit.idx, movement.endPosition);
+        scheduleHoverTooltip(hit.edge, hit.idx, movement.endPosition);
     }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
 }
 
 /**
  * Load PedMac network flow edges as colored polylines.
  */
-export async function loadNetworkFlow(jsonPath = NETWORK_FLOW_JSON, options = {}) {
+export async function loadNetworkFlow(jsonPath, options = {}) {
     const viewer = getViewer();
     clearNetworkFlow();
 
@@ -466,7 +534,12 @@ export function clearNetworkFlow() {
 
 export function toggleNetworkFlow(show, options = {}) {
     if (show && !flowEnabled) {
-        return loadNetworkFlow(NETWORK_FLOW_JSON, options);
+        // Resolved rather than passed, because the flow file may come from the
+        // active proposal, from the shared published copy, or from an upload —
+        // `resolveExistingPath` picks between them.
+        return resolveExistingPath('flow').then((url) =>
+            url ? loadNetworkFlow(url, options) : Promise.resolve()
+        );
     }
     if (!show && flowEnabled) {
         clearNetworkFlow();
@@ -515,7 +588,7 @@ function createDemandMaterial(points, bounds, opacity, vmax) {
     });
 }
 
-export async function loadPedestrianDemand(jsonPath = PEDESTRIAN_DEMAND_JSON, options = {}) {
+export async function loadPedestrianDemand(jsonPath, options = {}) {
     const viewer = getViewer();
     clearPedestrianDemand();
 
@@ -563,7 +636,10 @@ export function clearPedestrianDemand() {
 
 export function togglePedestrianDemand(show, options = {}) {
     if (show && !demandEnabled) {
-        return loadPedestrianDemand(PEDESTRIAN_DEMAND_JSON, options);
+        // Resolved for the active study, same as the flow network above.
+        return resolveExistingPath('demand').then((url) =>
+            url ? loadPedestrianDemand(url, options) : Promise.resolve()
+        );
     }
     if (!show && demandEnabled) {
         clearPedestrianDemand();

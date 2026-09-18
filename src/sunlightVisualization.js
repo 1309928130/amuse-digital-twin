@@ -6,16 +6,42 @@
 import { getViewer } from './cesiumViewer.js';
 import { loadLargeModel, removeLargeModel } from './largeModelLoader.js';
 import { ZUIDAS_CENTER } from './config.js';
+import { resolveExistingPath } from './dataRegistry.js';
 
-export const SUNLIGHT_GLB_PATH = './simulation_data/sunlight/sunlight_analysis_wgs84ready.glb';
-export const SUNLIGHT_PLACEMENT_PATH = './simulation_data/sunlight/sunlight_placement.json';
+/**
+ * Resolve the Sunlight GLB for the active study.
+ *
+ * Kept as a function rather than a constant because the file now depends on
+ * which proposal is selected. Returns null when no mesh exists for the study,
+ * so the caller can report that instead of attempting a fetch that will 404.
+ */
+async function resolveSunlightGlb() {
+    return resolveExistingPath('sunlight');
+}
+
+/**
+ * Resolve the companion placement file that positions the mesh.
+ *
+ * `sunlight_placement.json` sits beside the GLB and is uploaded with it, so it
+ * is not a separate quality slot. Deriving it from the directory of whichever
+ * GLB resolved keeps the pair together: an uploaded mesh with its own placement
+ * file finds that one, and a built-in mesh finds the published one.
+ *
+ * There is no `HEAD` probe here because the caller already tolerates a miss by
+ * falling back to the site centre, which is the pre-existing behaviour.
+ */
+function placementUrlFor(glbUrl) {
+    if (!glbUrl) return null;
+    const base = glbUrl.slice(0, glbUrl.lastIndexOf('/'));
+    return `${base}/sunlight_placement.json`;
+}
 
 let sunlightEntity = null;
 let sunlightEnabled = false;
 /** Design GLB entities hidden while sunlight is shown */
 let hiddenDesignEntities = [];
 
-async function resolvePlacement() {
+async function resolvePlacement(glbUrl) {
     const fallback = {
         position: {
             longitude: ZUIDAS_CENTER.longitude,
@@ -25,8 +51,10 @@ async function resolvePlacement() {
         orientation: { heading: 90, pitch: 0, roll: 0 },
         scale: 1.0,
     };
+    const placementUrl = placementUrlFor(glbUrl);
+    if (!placementUrl) return fallback;
     try {
-        const res = await fetch(SUNLIGHT_PLACEMENT_PATH, { cache: 'no-store' });
+        const res = await fetch(placementUrl, { cache: 'no-store' });
         if (!res.ok) return fallback;
         const meta = await res.json();
         const p = meta.placement_wgs84 || {};
@@ -114,13 +142,23 @@ function hideSunlightLegend() {
  */
 export async function loadSunlightAnalysis(options = {}) {
     clearSunlightAnalysis();
-    const { position, orientation, scale } = await resolvePlacement();
+
+    const glbUrl = await resolveSunlightGlb();
+    if (!glbUrl) {
+        // No mesh for this study. Report and leave the design massing alone,
+        // rather than hiding it for a layer that is not going to appear.
+        console.warn('[sunlight] No sunlight mesh for the active study.');
+        hideSunlightLegend();
+        return;
+    }
+
+    const { position, orientation, scale } = await resolvePlacement(glbUrl);
 
     hideDesignGlbs(options.designEntities || []);
 
     let entity;
     try {
-        entity = await loadLargeModel(SUNLIGHT_GLB_PATH, position, {
+        entity = await loadLargeModel(glbUrl, position, {
             name: 'Sunlight Analysis (Ladybug)',
             scale,
             minimumPixelSize: 0,

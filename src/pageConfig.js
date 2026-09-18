@@ -572,8 +572,29 @@ register({
 });
 
 register({
+    id: 'tools',
+    label: 'Tools',
+    title: 'Tools — bring your own data',
+    group: 'About',
+    // Not a place on the map but a working surface, so it takes over the
+    // viewport and leaves the camera where it was.
+    keepCamera: true,
+    tools: true,
+    layers: { networkFlow: false, pedDemand: false, urbanHeat: false, sunlight: false, wind: false },
+    linkTooltip: 'click',
+    // Only the contents list. The page explains its own blocks, so an explainer
+    // in the panel would repeat it.
+    sections: ['tools-toc'],
+});
+
+// Registered last in the About group, and so last in the navigation bar: the
+// documentation is reference material rather than a view of the study area, and
+// belongs after the working pages instead of in front of them. Order inside a
+// group follows registration order (see `buildNavigation`), so this position is
+// this block's place in the nav, not an accident of where it was written.
+register({
     id: 'framework',
-    label: 'The framework',
+    label: 'Documentation',
     title: 'AMUSE — Assessing Multisensory User Experience',
     group: 'About',
     // A reading page, not a place: it takes over the viewport with the user
@@ -587,22 +608,6 @@ register({
     layers: { networkFlow: false, pedDemand: false, urbanHeat: false, sunlight: false, wind: false },
     linkTooltip: 'click',
     sections: ['toc'],
-});
-
-register({
-    id: 'tools',
-    label: 'Tools',
-    title: 'Tools — bring your own data',
-    group: 'About',
-    // Like the framework page, this is not a place on the map but a working
-    // surface, so it takes over the viewport and leaves the camera where it was.
-    keepCamera: true,
-    tools: true,
-    layers: { networkFlow: false, pedDemand: false, urbanHeat: false, sunlight: false, wind: false },
-    linkTooltip: 'click',
-    // Only the contents list. The page explains its own blocks, so an explainer
-    // in the panel would repeat it.
-    sections: ['tools-toc'],
 });
 
 /**

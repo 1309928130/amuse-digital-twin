@@ -430,7 +430,8 @@ function buildBuiltInList(study) {
     const note = document.createElement('p');
     note.className = 'tools-builtin-note';
     note.textContent =
-        'To see it in context, use “Show the proposal”, or pick it on the Case studies page.';
+        'Nothing to upload here. Pick it on the Case studies page to see its results in ' +
+        'context, or open any assessment page from the bar above.';
     wrap.appendChild(note);
 
     return wrap;

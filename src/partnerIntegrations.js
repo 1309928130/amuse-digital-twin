@@ -86,18 +86,37 @@ const CONTACTS = [
  * bundle, not a live feed. A visitor watching buses that never move deserves to
  * know that rather than assume the site is broken.
  */
+/**
+ * The external feeds the viewer already knows about.
+ *
+ * `state` and `detail` describe where the data actually comes from, which matters
+ * more here than whether a feature "exists".
+ *
+ * This entry previously claimed the transit layer fell back to a snapshot
+ * committed to the bundle, so a visitor saw real vehicles frozen at capture time.
+ * That was wrong, and testing it is what showed it: the fallback only runs when
+ * the proxy replies with a rate-limit response, or with an HTML page served as
+ * 200. When no proxy is listening at all — the normal case on the deployed site —
+ * the fetch rejects with `Failed to fetch`, the catch logs "the visualization
+ * will continue without real-time vehicle data", and no vehicles are drawn.
+ *
+ * So the honest description is the simpler one: no proxy, no vehicles. Worth
+ * being exact about, because a visitor who saw an empty map and read the old
+ * wording would have concluded the site was broken rather than that a local
+ * component was missing.
+ */
 const FEEDS = [
     {
         id: 'gtfs',
         label: 'GTFS — public transport',
-        state: 'integrated',
-        summary: 'Vehicles on the map, filtered to the Zuidas area.',
+        state: 'needs a local proxy',
+        summary: 'Live vehicle positions for the Zuidas area, if you run the proxy.',
         detail:
-            'Live updates need a proxy on your own machine, because OVapi does not allow ' +
-            'requests straight from a browser (no CORS header). The deployed site therefore ' +
-            'falls back to a snapshot bundled with the viewer: the vehicles are real, but ' +
-            'they are frozen at the time the snapshot was taken. Run the proxy locally to ' +
-            'see them move.',
+            'OVapi does not allow requests straight from a browser (no CORS header), so the ' +
+            'viewer reaches it through a small proxy on your own machine. That proxy is not ' +
+            'part of the deployed site, and without it there is no transit layer at all — ' +
+            'not a stale one, just no vehicles. Run `npm start` to bring up the proxy and ' +
+            'the web server together and the vehicles appear.',
     },
 ];
 
@@ -390,7 +409,13 @@ function buildFeedList() {
         head.appendChild(name);
 
         const badge = document.createElement('span');
-        badge.className = 'tool-badge tool-badge-available';
+        // Coloured by whether the feed works here and now, not by whether the
+        // integration exists in the codebase: a feed that needs a local proxy is
+        // not doing anything for the reader looking at this page.
+        badge.className =
+            feed.state === 'integrated'
+                ? 'tool-badge tool-badge-available'
+                : 'tool-badge tool-badge-partial';
         badge.textContent = feed.state === 'integrated' ? 'Integrated' : feed.state;
         head.appendChild(badge);
 

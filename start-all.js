@@ -149,8 +149,15 @@ proxyServer.listen(PORT, () => {
     console.log(`  Cache TTL: ${CACHE_TTL_MS / 1000}s | fallback: ${STATIC_FALLBACK}`);
     console.log(`  Available: http://localhost:${PORT}/gtfs/vehiclePositions.pb\n`);
 
-    console.log('Starting web server on port 8080...');
-    const webServer = spawn('npx', ['http-server', '.', '-p', '8080', '-c-1'], {
+    // The web port is configurable because the default collided with other
+    // projects on this machine, and because a port that has to be remembered is
+    // a port that gets got wrong. `npm start` is the single entry point; it
+    // starts both servers so the transit layer has its proxy and nothing has to
+    // be started in a particular order.
+    const WEB_PORT = process.env.PORT || process.argv[2] || '8080';
+
+    console.log(`Starting web server on port ${WEB_PORT}...`);
+    const webServer = spawn('npx', ['http-server', '.', '-p', WEB_PORT, '-c-1'], {
         stdio: 'inherit',
         shell: true,
     });
@@ -160,9 +167,9 @@ proxyServer.listen(PORT, () => {
         process.exit(1);
     });
 
-    console.log('✓ Web server starting on http://localhost:8080');
+    console.log(`✓ Web server starting on http://localhost:${WEB_PORT}`);
     console.log('\nBoth servers are running!');
-    console.log('Open http://localhost:8080 in your browser\n');
+    console.log(`Open http://localhost:${WEB_PORT} in your browser\n`);
     console.log('Press Ctrl+C to stop both servers');
 
     process.on('SIGINT', () => {

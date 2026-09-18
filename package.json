@@ -6,6 +6,7 @@
   "main": "main.js",
   "scripts": {
     "start": "node start-all.js",
+    "start:8765": "node start-all.js 8765",
     "dev": "node start-all.js",
     "web": "npx http-server . -p 8080 -c-1",
     "proxy": "node proxy-server.js",
@@ -36,4 +37,3 @@
   },
   "devDependencies": {}
 }
-

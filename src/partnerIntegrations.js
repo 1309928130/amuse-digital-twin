@@ -69,7 +69,11 @@ const CONTACTS = [
     {
         label: 'Direct',
         address: 'c1309928130@gmail.com',
-        note: 'For anything you would rather discuss with a person directly.',
+        // Phrased as an instruction rather than a description of the reader's
+        // own preferences: the address is the technical route, and saying so
+        // tells someone with a broken file which of the two to use instead of
+        // leaving them to infer it from the labels alone.
+        note: 'Contact the developer directly for technical issues.',
     },
 ];
 

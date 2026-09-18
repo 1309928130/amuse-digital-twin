@@ -115,14 +115,56 @@
             font-size: 13px;
         }
 
-        /* --- Rendered Markdown --- */
+        /* --- Rendered Markdown ---
+         *
+         * The measure is the interesting number here. A cap of 860px was set for
+         * a comfortable reading line, but the right panel takes a share of the
+         * width, so on a wide display it left the document using well under half
+         * the available room while feeling cramped at the same time.
+         *
+         * The cap is absolute, deliberately. Two earlier attempts tried to make
+         * it scale with the available room — first `82vw`, then `88%` — and both
+         * failed to keep this page and the Tools page in step, because neither
+         * value means the same thing on the two pages. `vw` is viewport-relative
+         * while the parents differ by a scrollbar; `%` resolves against the
+         * containing block, which is an ancestor well inside the viewport. An
+         * absolute value is the only basis both pages agree on, so the columns
+         * cannot drift.
+         *
+         * 1180px is a compromise: close to the full content area on a laptop,
+         * with a bound that stops a very wide monitor stretching the text into an
+         * unreadable slab. Running text is capped separately by the
+         * per-paragraph rule below, so prose stays comfortable at this width.
+         */
         .doc {
-            max-width: 860px;
+            max-width: min(1180px, 100%);
             margin: 0 auto;
             padding: 0 32px;
+            /* `border-box` so the padding sits inside the cap, matching
+               `.tools-inner`. Under the default `content-box` the horizontal
+               padding is added on top of `max-width`, which alone made the two
+               pages disagree by 64px. */
+            box-sizing: border-box;
+            /* `#docView` is a column flex container, and a flex item stretches
+               across the cross axis by default — which overrides `max-width`
+               and would fill the container in full. This is what actually
+               centres the column. */
+            align-self: center;
+            width: 100%;
             font-size: 14.5px;
             line-height: 1.68;
             color: #1f2328;
+        }
+
+        /* Cap the running text inside the wider column. Without this the
+           paragraphs would run the full column width, which on a large screen is
+           roughly 150 characters a line — around twice the length that reads
+           comfortably. This is what makes the wider column safe for prose.
+           Figures, tables and headings are deliberately not capped: they are
+           scanned rather than read line by line, and benefit from the space. */
+        .doc p,
+        .doc li {
+            max-width: 78ch;
         }
         .doc h1,
         .doc h2,
@@ -1369,9 +1411,23 @@
         }
         .tools-inner {
             padding: 26px 30px 34px;
-            max-width: 1080px;
+            /* The same absolute cap as `.doc`. Absolute, not relative, because
+               `vw` and `%` each resolve differently on the two pages and let the
+               columns drift apart; a plain pixel value is the one basis they
+               share. Change this and the `.doc` value together if the column
+               should ever be re-sized — they are a pair. */
+            max-width: min(1180px, 100%);
+            /* `width: 100%` is load-bearing, not decoration. Without it this
+               element shrink-to-fits its content, so on a narrow screen it grew
+               to 438px inside a 360px scroller and the page scrolled sideways.
+               The `max-width` above bounds it on a wide screen; this makes it
+               fill its parent on a narrow one. */
             width: 100%;
             box-sizing: border-box;
+            /* The centring. Without this the column sat flush left while the
+               documentation page was centred, so moving between the two looked
+               like a layout change rather than a page change. */
+            margin: 0 auto;
         }
         .tools-head h2 {
             margin: 0 0 8px;

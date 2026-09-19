@@ -13,6 +13,12 @@ import {
     initVisualQualityIndex,
     disposeVisualQualityIndex,
 } from './visualQualityIndex.js';
+import {
+    initializeVisualQualityAnalytics,
+    openVisualQualityAnalytics,
+    closeVisualQualityAnalytics,
+    startVisualQualityAnalytics,
+} from './visualQualityAnalytics.js';
 import { initCameraPresets } from './cameraPresets.js';
 import { toggleGrasshopperHeat } from './heatmapVisualization.js';
 import { toggleSunlightAnalysis } from './sunlightVisualization.js';
@@ -441,11 +447,18 @@ export async function applyPageLayers(page) {
         if (flowSwitch) flowSwitch.checked = false;
     }
 
-    // --- Visual-quality index (live pedestrian detection) ---
+    // --- Visual-quality analytics (live pedestrian detection) ---
     // Only the Visual quality page has these controls. Detection competes with
-    // the renderer, so it is started by the reader and always stopped on leaving.
+    // the renderer for the same hardware, so it never outlives the page that
+    // shows its output — `gotoPage` stops it again on the way out.
     if (page.id === 'visual-quality') {
         initVisualQualityIndex();
+        initializeVisualQualityAnalytics('vqAnalytics');
+        // On by default: the read-out is the point of this page, so a visitor
+        // should not have to find a button to see it. Started without awaiting so
+        // the model download does not hold up the camera flight or the layers;
+        // the overlay reports its own loading state.
+        startVisualQualityAnalytics().catch(() => { /* reported in the overlay */ });
     } else {
         disposeVisualQualityIndex();
     }
@@ -973,6 +986,10 @@ export async function gotoPage(pageId, options = {}) {
     closeDoc();
     setCaseStudiesVisible(false);
     closeTools();
+    // Closing the analytics also stops its detection loop, which matters more
+    // here than for the purely presentational overlays: leaving it running would
+    // keep competing with the renderer for a page that no longer shows it.
+    closeVisualQualityAnalytics();
 
     if (page.doc) {
         await openDoc({ source: page.doc.source, title: page.doc.title || page.title });
@@ -987,6 +1004,8 @@ export async function gotoPage(pageId, options = {}) {
         );
     } else if (page.tools) {
         openTools();
+    } else if (page.id === 'visual-quality') {
+        openVisualQualityAnalytics();
     }
 
     // Start the sunlight mesh download now, before anything blocks on it.

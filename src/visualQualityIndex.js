@@ -39,7 +39,6 @@
  * saturates is clamped rather than allowed to run away.
  */
 
-import { detectInView, renderedAgentCount, loadModel, isModelReady } from './pedestrianDetector.js';
 import { applyCameraPreset } from './cameraPresets.js';
 
 /**
@@ -100,24 +99,22 @@ const TERMS = [
  * metric that degrades the thing it measures is not worth having. About one
  * update per second reads as live while leaving the renderer alone.
  */
-const DETECT_INTERVAL_MS = 1000;
-
-/**
- * The pedestrian count that saturates the pedestrian term.
- *
- * A busier-than-this view does not score higher, which stops a crowd scene from
- * dominating the index. Chosen to suit a street-level view of the simulated
- * area; it is part of the placeholder, not a finding.
- */
 const PEDESTRIAN_SATURATION = 25;
 
 /** Neutral value used for terms that are not measured, so they do not skew the sum. */
 const UNMEASURED_NEUTRAL = 0.5;
 
-let running = false;
-let detectTimer = null;
-let wired = false;
-let lastDetection = null;
+/**
+ * Detection used to live here; it now lives in `visualQualityAnalytics.js`.
+ *
+ * The split follows the two different jobs. This module owns the *arithmetic* --
+ * what the terms are, what they weigh, and what the sum comes to -- and knows
+ * nothing about frames or cameras. The analytics module owns the *measurement*
+ * and pushes a count in through `setDetectedPedestrians`. Keeping detection out
+ * of here means the index can be exercised without a viewer, a canvas or a model,
+ * and it is why the slider handlers below do not have to guard against the
+ * detector having started.
+ */
 
 /** Current weight per term id, so the sliders and the read-out share one source. */
 const weights = new Map(TERMS.map((t) => [t.id, t.weight]));
@@ -173,12 +170,34 @@ function computeIndex() {
     return sum / weightSum;
 }
 
+/**
+ * The weighted mean with every term at its neutral default.
+ *
+ * Shown beside the live index so a reader can see how much of the reading comes
+ * from the one measured term and how much from the placeholder assumptions. With
+ * all weights equal it is just the neutral value, but it moves as the sliders do,
+ * which is the point.
+ *
+ * @returns {number|null} The baseline, or null when no weight is non-zero.
+ */
+function computeBaseline() {
+    let sum = 0;
+    let total = 0;
+    for (const t of TERMS) {
+        const w = weights.get(t.id) || 0;
+        if (w === 0) continue;
+        total += Math.abs(w);
+        sum += w * UNMEASURED_NEUTRAL;
+    }
+    return total === 0 ? null : sum / total;
+}
+
 /** Update the index read-out. */
 function renderIndex() {
     const el = document.getElementById('vqIndexValue');
     if (!el) return;
-    const index = computeIndex();
-    el.textContent = index === null ? '–' : `${index.toFixed(3)} (placeholder)`;
+    const baseline = computeBaseline();
+    el.textContent = baseline === null ? '–' : baseline.toFixed(2);
 }
 
 /** Build the weight sliders once, from `TERMS`. */
@@ -214,163 +233,87 @@ function buildWeightControls() {
 }
 
 /**
- * Run one detection pass and update the read-out.
+ * Wire the sliders and paint the initial state.
  *
- * @returns {Promise<Object|null>} The detection result, or null on failure.
- */
-async function runDetection() {
-    const status = document.getElementById('vqDetectStatus');
-    try {
-        const result = await detectInView();
-        if (!result) {
-            if (status) status.textContent = 'Could not read the rendered frame.';
-            return null;
-        }
-        lastDetection = result;
-
-        const detected = document.getElementById('vqDetectedCount');
-        const rendered = document.getElementById('vqRenderedCount');
-        const timing = document.getElementById('vqInferenceMs');
-        if (detected) detected.textContent = String(result.count);
-        if (rendered) rendered.textContent = String(renderedAgentCount());
-        if (timing) timing.textContent = `${Math.round(result.ms)} ms · ${result.fps.toFixed(1)} fps`;
-
-        // The pedestrian term is the fraction of the saturation level, clamped.
-        values.set('pedestrians', Math.min(1, result.count / PEDESTRIAN_SATURATION));
-        renderFormula();
-        renderIndex();
-
-        drawPreview(result);
-        return result;
-    } catch (error) {
-        // Surfaced in the panel rather than only the console: on a deployed site
-        // the console is not somewhere a supervisor will look.
-        if (status) status.textContent = `Detection unavailable: ${error.message}`;
-        return null;
-    }
-}
-
-/**
- * Draw the detected boxes over a thumbnail of the frame that produced them.
- *
- * A count on its own is hard to trust -- a reader cannot tell a missed figure
- * from a correct zero. The thumbnail makes the result checkable at a glance.
- *
- * @param {Object} result Detection result.
- */
-function drawPreview(result) {
-    const canvas = document.getElementById('vqDetectPreview');
-    if (!canvas || !result.frame) return;
-
-    const { data, width, height } = result.frame;
-    // The frame is already the model's square input, so the preview is drawn at
-    // the same aspect and the stored boxes map onto it without rescaling.
-    const off = document.createElement('canvas');
-    off.width = width;
-    off.height = height;
-    const offCtx = off.getContext('2d');
-    offCtx.putImageData(new ImageData(new Uint8ClampedArray(data), width, height), 0, 0);
-
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(off, 0, 0);
-
-    ctx.strokeStyle = '#FFD54F';
-    ctx.lineWidth = 2;
-    ctx.font = '12px sans-serif';
-    ctx.fillStyle = '#FFD54F';
-    for (const det of result.detections) {
-        const [x1, y1, x2, y2] = det.box;
-        ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
-        ctx.fillText(det.score.toFixed(2), x1 + 2, Math.max(10, y1 - 2));
-    }
-    canvas.style.display = 'block';
-}
-
-/** Start the detection loop. */
-async function start() {
-    if (running) return;
-    const status = document.getElementById('vqDetectStatus');
-    const toggle = document.getElementById('vqDetectToggle');
-    const readout = document.getElementById('vqDetectReadout');
-
-    running = true;
-    if (toggle) toggle.textContent = 'Stop counting';
-    if (status) {
-        status.textContent = isModelReady()
-            ? 'Running.'
-            : 'Loading the detection model — the first run downloads about 4 MB.';
-    }
-
-    // The model load is awaited explicitly so a failure is reported before the
-    // loop starts, rather than as a rejected promise inside a timer.
-    try {
-        await loadModel();
-    } catch (error) {
-        running = false;
-        if (toggle) toggle.textContent = 'Start counting';
-        if (status) status.textContent = `Detection unavailable: ${error.message}`;
-        return;
-    }
-
-    if (!running) return;
-    if (readout) readout.style.display = 'block';
-    if (status) status.textContent = 'Running — counts update about once a second.';
-
-    await runDetection();
-    detectTimer = window.setInterval(() => {
-        if (!running) return;
-        runDetection();
-    }, DETECT_INTERVAL_MS);
-}
-
-/** Stop the detection loop. */
-function stop() {
-    running = false;
-    if (detectTimer !== null) {
-        window.clearInterval(detectTimer);
-        detectTimer = null;
-    }
-    const toggle = document.getElementById('vqDetectToggle');
-    const status = document.getElementById('vqDetectStatus');
-    if (toggle) toggle.textContent = 'Start counting';
-    if (status) {
-        status.textContent = lastDetection
-            ? `Stopped. Last count: ${lastDetection.count} in view.`
-            : 'Not running.';
-    }
-}
-
-/**
- * Wire the controls and paint the initial state.
- *
- * Called when the Visual quality page is shown.
+ * Called when the Visual quality page is shown. Detection is not started here:
+ * it is driven by the centre-panel analytics, which owns the button.
  */
 export function initVisualQualityIndex() {
     buildWeightControls();
-    if (!wired) {
-        wired = true;
-        const toggle = document.getElementById('vqDetectToggle');
-        const eye = document.getElementById('vqDetectEye');
-        if (toggle) toggle.addEventListener('click', () => (running ? stop() : start()));
-        if (eye) eye.addEventListener('click', () => applyCameraPreset('eye-level'));
+    const eye = document.getElementById('vqDetectEye');
+    if (eye && !eye.dataset.vqWired) {
+        eye.dataset.vqWired = '1';
+        eye.addEventListener('click', () => applyCameraPreset('eye-level'));
     }
     renderFormula();
     renderIndex();
 }
 
 /**
- * Stop detection when leaving the page.
+ * Nothing to tear down.
  *
- * Detection competes with the renderer for the same hardware, so it must not
- * keep running behind a page that no longer shows its output.
+ * The detection loop belongs to `visualQualityAnalytics.js`, which stops itself
+ * when its overlay closes. Kept as a named export so the controller's page-change
+ * branch stays symmetric with the other takeover pages.
  */
 export function disposeVisualQualityIndex() {
-    if (running) stop();
+    /* no-op: see above */
 }
 
 /** Whether the counter is currently running, for tests and diagnostics. */
 export function isCounting() {
     return running;
+}
+
+/**
+ * The index terms with their current weights and values.
+ *
+ * Exported so the centre-panel read-out can render them without duplicating the
+ * term list, which would let the two drift apart the first time a term changed.
+ *
+ * @returns {Object[]} Entries `{ id, label, symbol, weight, value, measured }`.
+ */
+export function getVisualQualityTerms() {
+    return TERMS.map((t) => ({
+        id: t.id,
+        label: t.label,
+        symbol: t.symbol,
+        weight: weights.get(t.id) || 0,
+        value: values.get(t.id),
+        measured: t.measured,
+    }));
+}
+
+/**
+ * The current index value.
+ *
+ * @returns {number|null} The weighted mean, or null when no weight is non-zero.
+ */
+export function getVisualQualityIndex() {
+    return computeIndex();
+}
+
+/**
+ * Feed a measured pedestrian count into the index.
+ *
+ * Called by the centre-panel analytics when detection returns, so the formula
+ * reflects the same count the reader can see. Kept as an explicit setter rather
+ * than having the detector reach into this module, so the dependency runs one
+ * way and the index stays testable without a running detector.
+ *
+ * @param {number} count Pedestrians detected in view.
+ * @returns {number} The normalised value stored for the term.
+ */
+export function setDetectedPedestrians(count) {
+    const n = Number.isFinite(count) ? Math.max(0, count) : 0;
+    const normalised = Math.min(1, n / PEDESTRIAN_SATURATION);
+    values.set('pedestrians', normalised);
+    renderFormula();
+    renderIndex();
+    return normalised;
+}
+
+/** The saturation count used to normalise the pedestrian term. */
+export function getPedestrianSaturation() {
+    return PEDESTRIAN_SATURATION;
 }

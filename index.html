@@ -1943,6 +1943,197 @@
             display: none;
         }
 
+        /* ---- Eye-level visual-quality analytics (floating overlay) ---- */
+        /*
+           A transparent layer over the live scene, not a panel that replaces it.
+           The whole point of this read-out is that it is about the view you are
+           looking at, so the view has to stay visible and usable: every cluster
+           is translucent, and the container itself is pointer-events:none so the
+           globe stays pannable and clickable underneath.
+        */
+        #vqAnalytics {
+            position: absolute;
+            inset: var(--nav-height) 0 0 0;
+            z-index: 850;
+            pointer-events: none;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            color: #f1f3f5;
+        }
+        #vqAnalytics[hidden] {
+            display: none;
+        }
+
+        .vq-float {
+            position: absolute;
+            /* Translucent enough that the scene reads through it, dark enough that
+               light renders do not swallow the text. */
+            background: rgba(12, 15, 20, 0.55);
+            backdrop-filter: blur(7px);
+            -webkit-backdrop-filter: blur(7px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 9px;
+            padding: 10px 12px;
+            box-shadow: 0 6px 22px rgba(0, 0, 0, 0.32);
+        }
+
+        /* Box layer: a transparent canvas over the whole scene. It has to cover
+           the view so boxes are drawn at their true screen positions, but it is
+           part of the pointer-events:none layer, so it intercepts nothing. */
+        .vq-box-layer {
+            position: absolute;
+            left: 0;
+            top: 0;
+            pointer-events: none;
+        }
+
+        /* Live numbers, below the navigation bar on the left so they clear both
+           the nav and Cesium's own layer picker. */
+        .vq-float-stats {
+            left: 16px;
+            top: 16px;
+            width: 214px;
+        }
+
+        /* The index, bottom-right, above the credit strip. */
+        .vq-float-index {
+            right: 16px;
+            bottom: 46px;
+            width: 262px;
+        }
+
+        /* Status: model loading or a failure. Centred, and only present then. */
+        .vq-float-status {
+            left: 50%;
+            top: 18px;
+            transform: translateX(-50%);
+            max-width: 60vw;
+            text-align: center;
+            font-size: 12.5px;
+            color: #ffd9d0;
+        }
+
+        .vq-float-title {
+            font-size: 12.5px;
+            font-weight: 650;
+            letter-spacing: 0.01em;
+            margin-bottom: 7px;
+            color: #f1f3f5;
+        }
+        .vq-float-title.vq-small {
+            font-size: 10.5px;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: #9aa4b2;
+            font-weight: 600;
+        }
+        .vq-stat {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 3px 0;
+        }
+        .vq-stat-label {
+            font-size: 11px;
+            color: #9aa4b2;
+        }
+        .vq-stat-value {
+            font-size: 18px;
+            font-weight: 650;
+            font-variant-numeric: tabular-nums;
+            color: #FFD54F;
+        }
+        .vq-stat-value.vq-muted {
+            font-size: 13px;
+            font-weight: 500;
+            color: #c8cfd8;
+        }
+        .vq-spark {
+            margin-top: 5px;
+            padding-top: 5px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .vq-formula {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: 11px;
+        }
+        .vq-formula-row {
+            display: flex;
+            align-items: baseline;
+            gap: 6px;
+        }
+        .vq-term {
+            color: #FFD54F;
+            font-weight: 600;
+            flex: 0 0 auto;
+        }
+        .vq-term-label {
+            flex: 1 1 auto;
+            color: #b6bec9;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .vq-term-value {
+            font-variant-numeric: tabular-nums;
+            color: #e8eaed;
+        }
+        .vq-tag {
+            font-size: 9px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #8b949e;
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            border-radius: 3px;
+            padding: 0 3px;
+        }
+        .vq-index-row {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            margin-top: 6px;
+            padding-top: 5px;
+            border-top: 1px solid rgba(255, 255, 255, 0.12);
+        }
+        .vq-analytics-note {
+            font-size: 10px;
+            line-height: 1.45;
+            color: #8b949e;
+            margin-top: 5px;
+        }
+        /* The all-defaults baseline, kept quiet so it reads as a reference rather
+           than as a second answer. */
+        .vq-index-baseline {
+            font-size: 11px;
+            font-variant-numeric: tabular-nums;
+            color: #8b949e;
+            margin-left: 3px;
+        }
+        .vq-index-baseline::before {
+            content: '(all-default ';
+            font-size: 9.5px;
+        }
+        .vq-index-baseline::after {
+            content: ')';
+            font-size: 9.5px;
+        }
+
+        /* On a narrow viewport the floating cards would collide, so they shrink.
+           The box layer needs no adjustment: it is sized from the canvas. */
+        @media (max-width: 900px) {
+            .vq-float-stats {
+                width: 176px;
+            }
+            .vq-float-index {
+                width: 210px;
+                right: 10px;
+                bottom: 40px;
+            }
+        }
+
         .tools-inner {
             padding: 26px 30px 34px;
             max-width: min(calc(100vw - var(--right-panel-width) - 8vw),
@@ -3124,6 +3315,16 @@
     -->
     <section id="toolsView" aria-label="Tools" hidden></section>
 
+    <!--
+        Centre-panel analytics for the visual-quality page.
+
+        A takeover overlay rather than a side column, because this panel's content
+        is the result rather than a control: it shows the frame that was analysed
+        with the detections drawn on it, so the count can be checked by eye instead
+        of taken on trust. Filled by `visualQualityAnalytics.js`.
+    -->
+    <section id="vqAnalytics" aria-label="Eye-level visual quality" hidden></section>
+
     <!-- ================= Right parameter panel =================== -->
     <aside id="paramPanel" aria-label="Page parameters and legend">
         <!--
@@ -3277,73 +3478,52 @@
             </div>
         </div>
 
-        <!-- Section: visual-quality pedestrian detection -->
+        <!-- Section: visual-quality controls -->
         <!--
-          The live pedestrian counter, plus the formula it feeds. The count comes
-          from running detection on the rendered frame, so it reports what is
-          actually legible in this view rather than what the simulation contains;
-          both numbers are shown, because the difference between them is the
-          point of the exercise.
+          Only the controls live here now. The measurements and the index used to
+          be in this column too, but a number updating in a narrow side list reads
+          as a setting rather than as a result; they have moved to the centre
+          panel, where the analysed frame can be shown beside them.
         -->
         <div class="param-section" data-section-id="legend-visual-quality-live">
-            <div class="param-section-title">Pedestrians in view (live)</div>
+            <div class="param-section-title">Eye-level visual quality</div>
 
             <div style="display:flex;gap:6px;margin:6px 0;">
-                <button type="button" id="vqDetectToggle" class="param-action-btn flow-hour-btn">Start counting</button>
+                <button type="button" id="vqDetectToggle" class="param-action-btn flow-hour-btn">Analyse eye-level visual quality</button>
                 <button type="button" id="vqDetectEye" class="param-action-btn flow-hour-btn">Eye level</button>
             </div>
 
-            <!--
-              Detection is far heavier than the scene, so it runs on demand
-              rather than on load: a visitor who is not looking at this metric
-              should not pay for it in frame rate.
-            -->
-            <div id="vqDetectStatus" class="param-help" style="margin-top:6px;">
-                Not running. Detects pedestrians in the current view using an
-                on-device model.
-            </div>
-
-            <div id="vqDetectReadout" style="display:none;margin-top:8px;">
-                <div style="display:flex;justify-content:space-between;font-size:11.5px;padding:2px 0;">
-                    <span style="opacity:0.75;">Detected in view</span><b id="vqDetectedCount">–</b>
-                </div>
-                <div style="display:flex;justify-content:space-between;font-size:11.5px;padding:2px 0;">
-                    <span style="opacity:0.75;">Agents rendered</span><span id="vqRenderedCount">–</span>
-                </div>
-                <div style="display:flex;justify-content:space-between;font-size:11.5px;padding:2px 0;">
-                    <span style="opacity:0.75;">Inference</span><span id="vqInferenceMs">–</span>
-                </div>
-                <canvas id="vqDetectPreview" width="160" height="90"
-                        style="width:100%;margin-top:6px;border-radius:4px;display:none;"></canvas>
+            <div class="param-help">
+                Counts people in the current view with an on-device detector and scores
+                the view against the index below. Runs by default; results float over
+                the scene.
             </div>
         </div>
 
-        <!-- Section: visual-quality index -->
+        <!-- Section: visual-quality index weights -->
         <!--
-          A placeholder index with named terms and adjustable weights. It is
-          labelled as a placeholder in the panel itself, because presenting
-          invented weights as a calibrated score would be the most misleading
-          thing this page could do.
+          The weights stay in the panel because they are controls, and the index
+          value is mirrored here so a reader adjusting a weight can see the effect
+          without the centre panel covering the scene.
+        -->
+        <!-- Section: visual-quality index weights -->
+        <!--
+          Weights only. These are controls, so they belong in the panel that holds
+          the controls. The formula they evaluate and the resulting index are the
+          *result*, and they now float over the scene with the detection boxes, so
+          every part of the measurement is in one place and none of it is a second
+          copy of the view.
         -->
         <div class="param-section" data-section-id="legend-visual-quality-index">
-            <div class="param-section-title">Visual-quality index</div>
-
-            <div id="vqFormula" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
-                 font-size:11px;line-height:1.9;margin:6px 0;padding:8px;
-                 background:rgba(255,255,255,0.05);border-radius:4px;white-space:nowrap;
-                 overflow-x:auto;"></div>
+            <div class="param-section-title">Index weights</div>
 
             <div class="param-help" style="margin-bottom:8px;">
-                Placeholder weights. Move a slider to see how the index responds; the
-                pedestrian term uses the live count above.
+                Placeholder weights, not calibrated. Move a slider to see the index
+                respond; the pedestrian term uses the live count. The formula and the
+                result are shown over the scene.
             </div>
 
             <div id="vqWeightControls"></div>
-
-            <div style="display:flex;justify-content:space-between;margin-top:8px;
-                        padding-top:6px;border-top:1px solid rgba(255,255,255,0.14);font-size:12px;">
-                <span style="opacity:0.8;">Index</span><b id="vqIndexValue">–</b>
-            </div>
         </div>
 
         <!-- Section: demand legend -->

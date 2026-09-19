@@ -617,7 +617,12 @@ register({
     // eye height; a camera above the street shows the layout rather than the
     // view. The `eye-level` global preset moves here too, so the two agree.
     camera: { ...EYE_LEVEL_VIEW },
-    layers: { sunlight: false, urbanHeat: false, networkFlow: false, wind: false, trajectories: true },
+    // The sunlight mesh is the only 3D model that loads on this page. It is on
+    // by default for the same reason it is on every other quality page: at eye
+    // level, with an empty scene, a pedestrian count gives no sense of what the
+    // person is looking at. The re-coloured Zuidas blocks stand in for the
+    // streetscape until the model is good enough to ship in its place.
+    layers: { sunlight: true, urbanHeat: false, networkFlow: false, wind: false, trajectories: true },
     linkTooltip: 'click',
     sections: ['layers', 'legend-visual-quality', 'legend-visual-quality-live', 'legend-visual-quality-index', 'validity'],
     validity: {

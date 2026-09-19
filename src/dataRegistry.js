@@ -7,13 +7,19 @@
  *
  *   1. **Built in, per proposal** — `simulation_data/<study>/<file>`. What the
  *      repository ships for Proposal 1, and what later assessments add.
- *   2. **Built in, shared** — `simulation_data/<file>`. The original layout,
- *      which predates proposals and still holds the flow, demand and heat files.
- *      Kept as a fallback so nothing that worked before breaks.
- *   3. **Uploaded by the visitor** — held in memory for the session. A file the
+ *   2. **Uploaded by the visitor** — held in memory for the session. A file the
  *      user drops into the Tools page resolves like any other, and takes
- *      precedence over both of the above, because choosing a file is an explicit
+ *      precedence over the built-in one, because choosing a file is an explicit
  *      statement about which results to show.
+ *
+ * The original shared layout — `simulation_data/<file>`, which predates
+ * proposal folders — is no longer consulted. Its files were copied into
+ * `proposal-1/` and the duplicates removed, because keeping the fallback meant a
+ * proposal with no results of its own could appear to have some, with a sibling
+ * proposal's data answering instead. The one exception is
+ * `simulation_data/pedflow_manifest.json`, which is still read from the flat
+ * path as a last resort by `pageController.js` when the flow results resolve to
+ * nothing; see the note there.
  *
  * ## Why object URLs rather than a virtual filesystem
  *

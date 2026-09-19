@@ -274,7 +274,7 @@ PedMac link flows and trip-generation demand can also be inspected in the [feder
 The microscopic simulation was migrated from SUMO/MassMotion to **Kova PedSim**, a
 Grasshopper plugin, so that the agent simulation runs inside the same modelling
 environment as the rest of the assessment pipeline. The working definition is
-`micro_mobility_simulation.ghx`.
+`micro_mobility_simulation_export.ghx`.
 
 Because Kova's simulation objects expose only the inherited `System.Object`
 members to Rhino's Python 3 (their own fields are not reachable from dynamic

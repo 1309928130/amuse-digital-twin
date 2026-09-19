@@ -1,11 +1,11 @@
 {
-  "note": "User-framed walk-through endpoints. Height forced to 1.7 m; pitch forced to 0 (level). Heading kept from the framed view.",
-  "eyeHeightM": 1.7,
+  "note": "User-framed walk-through endpoints. Height forced to 1.6 m; pitch forced to 0 (level). Heading kept from the framed view.",
+  "eyeHeightM": 1.6,
   "pitchDeg": 0,
   "start": {
     "longitude": 4.8663143,
     "latitude": 52.3368032,
-    "height": 1.7,
+    "height": 1.6,
     "headingDeg": 28.89,
     "pitchDeg": 0,
     "capturedHeightRaw": 1.3,
@@ -14,7 +14,7 @@
   "end": {
     "longitude": 4.8668335,
     "latitude": 52.3373034,
-    "height": 1.7,
+    "height": 1.6,
     "headingDeg": 33.49,
     "pitchDeg": 0,
     "capturedHeightRaw": 1.0,

@@ -34,11 +34,11 @@
  *    walker faces along the path ahead of them. The look-at point is averaged
  *    over a span a few metres down the route, which also smooths out the lattice
  *    jitter in the raw path so the view does not twitch left and right.
- * 3. **Height is flat, 1.7 m above the ellipsoid.** Deliberately not sampled from
+ * 3. **Height is flat, 1.6 m above the ellipsoid.** Deliberately not sampled from
  *    the globe: `getHeight` returns terrain-tile heights, and this globe reports
  *    about -2900 m under this street, which buried the camera. Nothing else in
  *    the scene samples terrain either -- the trajectories, avatars and street
- *    presets all use explicit heights above the ellipsoid -- so a flat 1.7 m is
+ *    presets all use explicit heights above the ellipsoid -- so a flat 1.6 m is
  *    the same surface the pedestrians being watched are standing on.
  */
 
@@ -59,11 +59,11 @@ const Cesium = globalThis.Cesium;
  * This is not a compromise, because nothing else in the scene samples terrain
  * either. The trajectories, the avatars and the street-level presets all anchor
  * to the ellipsoid with explicit heights (`Cartesian3.fromDegrees(lon, lat, h)`),
- * so a flat 1.7 m above the ellipsoid is the same surface everything the camera
+ * so a flat 1.6 m above the ellipsoid is the same surface everything the camera
  * walks past is standing on. Sampling terrain here would put the camera on a
  * different surface from the people it is meant to be walking among.
  */
-const EYE_HEIGHT_M = 1.7;
+const EYE_HEIGHT_M = 1.6;
 
 /**
  * How far ahead of the camera the looking point is placed, in metres.

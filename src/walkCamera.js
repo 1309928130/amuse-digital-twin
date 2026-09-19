@@ -86,17 +86,25 @@ const LOOK_SMOOTHING_M = 18;
 /**
  * Pitch while walking, in degrees below the horizon.
  *
- * Matches `EYE_LEVEL_VIEW.pitchDeg` in `pageConfig.js`. The earlier version
- * aimed the camera at a point 0.6 m below eye height a few metres ahead, which
- * produced about -26 deg of pitch once the look-ahead collapsed on a lattice
- * zig-zag -- far too much toward the ground for a standing eye. Setting pitch
- * explicitly keeps the framing level regardless of how short the ahead sample
- * momentarily is.
+ * Level (0) for the framed walk-through: the user asked for eye height without
+ * leaning up or down. Agent-route walks keep the same value so the two modes
+ * match.
  */
-const WALK_PITCH_DEG = -2.0;
+const WALK_PITCH_DEG = 0;
 
 /** Default walking speed, in metres per second. Matches the run's median. */
 const DEFAULT_SPEED_MPS = 1.2;
+
+/**
+ * Path to the user-framed start/end walk.
+ *
+ * Built from two camera poses the reviewer framed in the browser. Preferred over
+ * the longest agent footpath when present, because it is the walk they asked for.
+ */
+const FRAMED_WALK_URL = 'simulation_data/proposal-1/walk_through_poses.json';
+
+/** Sentinel route index for the framed walk in the picker. */
+const FRAMED_ROUTE_INDEX = -1;
 
 let route = null;
 let routeLength = 0;
@@ -115,7 +123,13 @@ let activeGeneration = 0;
 let preRenderRemove = null;
 let lastTime = 0;
 let loadedAgents = null;
-let activeRouteIndex = -1;
+/** Cached framed walk from `walk_through_poses.json`, or null when absent. */
+let framedWalk = null;
+let framedWalkLoaded = false;
+let activeRouteIndex = FRAMED_ROUTE_INDEX;
+/** Optional heading endpoints in degrees, used to blend facing along a framed walk. */
+let headingStartDeg = null;
+let headingEndDeg = null;
 let wired = false;
 
 /** Geodetic scratch objects, reused to keep the per-frame allocation at zero. */
@@ -153,20 +167,66 @@ async function loadTrajectories() {
 }
 
 /**
+ * Load the user-framed start/end walk, once.
+ *
+ * @returns {Promise<Object|null>} `{ footpath, metres, startHeadingDeg, endHeadingDeg }` or null.
+ */
+async function loadFramedWalk() {
+    if (framedWalkLoaded) return framedWalk;
+    framedWalkLoaded = true;
+    try {
+        const response = await fetch(FRAMED_WALK_URL);
+        if (!response.ok) return null;
+        const payload = await response.json();
+        const path = payload && payload.path;
+        if (!path || !Array.isArray(path.footpath) || path.footpath.length < 2) return null;
+        framedWalk = {
+            footpath: path.footpath,
+            metres: path.metres || pathLengthMetres(path.footpath),
+            startHeadingDeg: path.startHeadingDeg != null
+                ? path.startHeadingDeg
+                : (payload.start && payload.start.headingDeg),
+            endHeadingDeg: path.endHeadingDeg != null
+                ? path.endHeadingDeg
+                : (payload.end && payload.end.headingDeg),
+        };
+        return framedWalk;
+    } catch (err) {
+        console.warn('[walkCamera] could not load framed walk:', err);
+        return null;
+    }
+}
+
+/**
  * Route lengths for every agent, for the picker.
  *
  * Measured in metres on the ellipsoid rather than in degrees, because a degree
  * of longitude is not a degree of latitude at this latitude and sorting by raw
  * coordinate distance would misorder the routes.
  *
- * @returns {Promise<Object[]>} `{ index, metres }` per agent with a usable path.
+ * When a framed walk exists it is returned first, under the sentinel index
+ * `FRAMED_ROUTE_INDEX`, so the picker can put it at the top as the default.
+ *
+ * @returns {Promise<Object[]>} `{ index, metres, label? }` per usable path.
  */
 export async function listWalkRoutes() {
+    const out = [];
+    const framed = await loadFramedWalk();
+    if (framed) {
+        out.push({
+            index: FRAMED_ROUTE_INDEX,
+            metres: framed.metres,
+            label: `Framed walk — ${Math.round(framed.metres)} m`,
+        });
+    }
     const agents = await loadTrajectories();
-    if (!agents) return [];
-    return agents
-        .map((agent, index) => ({ index, metres: pathLengthMetres(agent.footpath) }))
-        .filter((r) => r.metres > 0);
+    if (agents) {
+        for (let index = 0; index < agents.length; index++) {
+            const metres = pathLengthMetres(agents[index].footpath);
+            if (metres > 0) out.push({ index, metres });
+        }
+    }
+    return out;
 }
 
 /**
@@ -208,34 +268,31 @@ function distanceMetres(a, b) {
 }
 
 /**
- * Pick the default route: the longest footpath in the run.
+ * Pick the default route: the framed walk when present, otherwise the longest
+ * agent footpath.
  *
- * @returns {Promise<number>} Agent index, or -1 when there is nothing to walk.
+ * @returns {Promise<number>} Route index, or a sentinel less than -1 when empty.
  */
 async function pickDefaultRoute() {
+    const framed = await loadFramedWalk();
+    if (framed) return FRAMED_ROUTE_INDEX;
     const routes = await listWalkRoutes();
-    if (!routes.length) return -1;
-    // Sorted rather than reduced so ties resolve to the lowest index, which keeps
-    // the default stable across loads instead of depending on iteration order.
-    routes.sort((a, b) => b.metres - a.metres || a.index - b.index);
-    return routes[0].index;
+    const agents = routes.filter((r) => r.index >= 0);
+    if (!agents.length) return -2;
+    agents.sort((a, b) => b.metres - a.metres || a.index - b.index);
+    return agents[0].index;
 }
 
 /**
- * Set the active route and precompute its cumulative arc length.
+ * Install a footpath as the active route and rebuild the cumulative length table.
  *
- * The cumulative array is what makes constant-speed motion possible: `travelled`
- * is a distance, and this maps it back to a point on the path.
- *
- * @param {number} index Agent index.
- * @returns {Promise<boolean>} Whether the route was applied.
+ * @param {Array<number[]>} path `[lon, lat]` pairs.
+ * @param {number} index Route index to record.
+ * @param {Object} [headings] Optional `{ start, end }` in degrees.
+ * @returns {boolean} Whether the path was usable.
  */
-export async function setWalkRoute(index) {
-    const agents = await loadTrajectories();
-    if (!agents || !agents[index]) return false;
-    const path = agents[index].footpath;
+function installPath(path, index, headings = null) {
     if (!Array.isArray(path) || path.length < 2) return false;
-
     route = path;
     activeRouteIndex = index;
     cumulative = new Float64Array(path.length);
@@ -244,10 +301,33 @@ export async function setWalkRoute(index) {
         cumulative[i] = cumulative[i - 1] + distanceMetres(path[i - 1], path[i]);
     }
     routeLength = cumulative[path.length - 1];
-    // Starting mid-route would be arbitrary; starting at the first point means
-    // the walk begins where the agent began.
     travelled = 0;
+    headingStartDeg = headings && Number.isFinite(headings.start) ? headings.start : null;
+    headingEndDeg = headings && Number.isFinite(headings.end) ? headings.end : null;
     return routeLength > 0;
+}
+
+/**
+ * Set the active route and precompute its cumulative arc length.
+ *
+ * The cumulative array is what makes constant-speed motion possible: `travelled`
+ * is a distance, and this maps it back to a point on the path.
+ *
+ * @param {number} index Agent index, or `FRAMED_ROUTE_INDEX` for the framed walk.
+ * @returns {Promise<boolean>} Whether the route was applied.
+ */
+export async function setWalkRoute(index) {
+    if (index === FRAMED_ROUTE_INDEX) {
+        const framed = await loadFramedWalk();
+        if (!framed) return false;
+        return installPath(framed.footpath, FRAMED_ROUTE_INDEX, {
+            start: framed.startHeadingDeg,
+            end: framed.endHeadingDeg,
+        });
+    }
+    const agents = await loadTrajectories();
+    if (!agents || !agents[index]) return false;
+    return installPath(agents[index].footpath, index, null);
 }
 
 /**
@@ -371,18 +451,19 @@ function step() {
 
     const eyeCartesian = Cesium.Cartesian3.fromRadians(eyeLon, eyeLat, EYE_HEIGHT_M);
 
-    // Heading from the geodetic bearing to the look-ahead point, pitch fixed at
-    // `WALK_PITCH_DEG`. Computing pitch from a look-at with a height drop made
-    // the framing depend on how far ahead the sample landed; on lattice
-    // zig-zags that distance collapsed and the camera pitched hard into the
-    // ground (measured ~-26 deg). A fixed pitch matching the eye-level preset
-    // keeps the horizon in frame regardless.
-    const dLon = targetLon - eyeLon;
-    const dLat = targetLat - eyeLat;
-    const heading = Math.atan2(
-        dLon * Math.cos(eyeLat),
-        dLat
-    );
+    // Heading: when the route carries framed start/end headings, blend them by
+    // progress so the walk begins facing as framed and ends facing as framed.
+    // Otherwise use the geodetic bearing to the look-ahead point (agent routes).
+    // Pitch is always level -- the framed walk asked for no lean up or down.
+    let heading;
+    if (headingStartDeg != null && headingEndDeg != null && routeLength > 0) {
+        const t = Math.max(0, Math.min(1, travelled / routeLength));
+        heading = Cesium.Math.toRadians(lerpHeadingDeg(headingStartDeg, headingEndDeg, t));
+    } else {
+        const dLon = targetLon - eyeLon;
+        const dLat = targetLat - eyeLat;
+        heading = Math.atan2(dLon * Math.cos(eyeLat), dLat);
+    }
 
     camera.setView({
         destination: eyeCartesian,
@@ -392,6 +473,19 @@ function step() {
             roll: 0,
         },
     });
+}
+
+/**
+ * Interpolate compass headings, taking the short arc across 0/360.
+ *
+ * @param {number} a Start heading, degrees.
+ * @param {number} b End heading, degrees.
+ * @param {number} t Progress in 0..1.
+ * @returns {number} Blended heading in degrees, normalised to 0..360.
+ */
+function lerpHeadingDeg(a, b, t) {
+    let delta = ((b - a + 540) % 360) - 180;
+    return (a + delta * t + 360) % 360;
 }
 
 /** Listeners told when the walk starts or stops, e.g. to relabel the button. */
@@ -442,8 +536,12 @@ export async function startWalkCamera() {
     const generation = walkGeneration;
 
     if (!route) {
-        const index = activeRouteIndex >= 0 ? activeRouteIndex : await pickDefaultRoute();
-        if (index < 0 || !(await setWalkRoute(index))) {
+        // Prefer the picker's current selection (framed walk is index -1); fall
+        // back to the default only when nothing has been chosen yet.
+        const index = activeRouteIndex >= FRAMED_ROUTE_INDEX
+            ? activeRouteIndex
+            : await pickDefaultRoute();
+        if (index < FRAMED_ROUTE_INDEX || !(await setWalkRoute(index))) {
             startPending = false;
             return false;
         }
@@ -554,8 +652,10 @@ export function getWalkProgress() {
  */
 export async function resetWalkCamera() {
     if (!route) {
-        const index = activeRouteIndex >= 0 ? activeRouteIndex : await pickDefaultRoute();
-        if (index < 0 || !(await setWalkRoute(index))) return false;
+        const index = activeRouteIndex >= FRAMED_ROUTE_INDEX
+            ? activeRouteIndex
+            : await pickDefaultRoute();
+        if (index < FRAMED_ROUTE_INDEX || !(await setWalkRoute(index))) return false;
     }
     travelled = 0;
     emitState();
@@ -620,19 +720,23 @@ export async function initWalkCamera() {
     if (routeSelect) {
         const routes = await listWalkRoutes();
         if (routes.length) {
-            routes.sort((a, b) => b.metres - a.metres || a.index - b.index);
+            // Framed walk first (if present), then agent routes by length.
+            const framed = routes.filter((r) => r.index === FRAMED_ROUTE_INDEX);
+            const agents = routes
+                .filter((r) => r.index >= 0)
+                .sort((a, b) => b.metres - a.metres || a.index - b.index);
+            const ordered = [...framed, ...agents];
             routeSelect.innerHTML = '';
-            // Named by length rather than by agent id: a reader choosing a route
-            // is choosing how far to walk, and the agent number means nothing
-            // without the export open beside them.
-            routes.forEach((r, i) => {
+            ordered.forEach((r, i) => {
                 const option = document.createElement('option');
                 option.value = String(r.index);
-                option.textContent = `Route ${i + 1} — ${Math.round(r.metres)} m`;
+                option.textContent = r.label
+                    || `Route ${i + 1 - framed.length} — ${Math.round(r.metres)} m`;
                 routeSelect.appendChild(option);
             });
-            activeRouteIndex = routes[0].index;
+            activeRouteIndex = ordered[0].index;
             routeSelect.value = String(activeRouteIndex);
+            await setWalkRoute(activeRouteIndex);
         } else {
             routeSelect.innerHTML = '<option value="">No routes in this study</option>';
         }

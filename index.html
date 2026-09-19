@@ -1288,7 +1288,8 @@
             font-weight: 400;
         }
 
-        /* ---- Global legends: collapsible accordion at the panel bottom ---- */
+        /* ---- Collapsible panel sections (layers, camera, global legends) ----
+           Cards fold independently and remember their state for the session. */
         #paramPanel .param-section-title.param-accordion {
             display: flex;
             align-items: center;
@@ -1310,7 +1311,10 @@
         #paramPanel .param-accordion[aria-expanded="true"] .chevron {
             transform: rotate(90deg);
         }
-        /* Folded by default so the panel keeps room for page-specific content */
+        /* Folded by default for the global legends, so the panel keeps room for
+           page-specific content. The layers and camera sections override this by
+           carrying `open` in the markup: they are primary controls, not settings.
+        */
         #paramPanel .param-fold {
             display: none;
             padding: 2px 0 4px;
@@ -3345,7 +3349,17 @@
 
         <!-- Section: layer toggles (all assessment pages) -->
         <div class="param-section" data-section-id="layers">
-            <div class="param-section-title">Layers</div>
+            <!--
+                Foldable, and open by default. A page can carry seven layer
+                switches, which pushed everything below it -- the camera presets
+                and the page's own legends -- off the visible panel. Folding it
+                lets a reader who has finished choosing layers collapse the list
+                rather than scrolling past it.
+            -->
+            <div class="param-section-title param-accordion" data-fold-key="layers" aria-expanded="true">
+                <span>Layers</span><span class="chevron">▶</span>
+            </div>
+            <div class="param-fold open">
             <label class="param-row">
                 <input type="checkbox" id="networkFlowSwitch">
                 <span>Pedestrian flow (links)</span>
@@ -3382,6 +3396,46 @@
                 <input type="checkbox" id="pollutionSwitch">
                 <span>Pollutant concentration</span>
             </label>
+            </div>
+        </div>
+
+        <!--
+            Section: camera position.
+
+            Sits directly under the layers, not with the other globals at the
+            bottom of the panel. Changing the framing is the second thing a reader
+            does on any page -- after switching a layer on, to look at it -- and it
+            was far enough down in the globals that it read as scene settings
+            rather than as part of how the page is viewed.
+
+            The presets are named framings of the same scene. The four views are
+            not arbitrary: each one is the framing its own assessment page uses,
+            so selecting it here reproduces that page's eye. Reuses the page
+            presets rather than restating coordinates, so a preset that is
+            re-derived (as the street view was, from the Kova run) stays correct
+            here too.
+        -->
+        <div class="param-section" data-section-id="camera">
+            <!-- Open by default: this is a primary control now that it sits here,
+                 not a setting a reader has to go looking for. -->
+            <div class="param-section-title param-accordion" data-fold-key="camera" aria-expanded="true">
+                <span>Camera position</span><span class="chevron">▶</span>
+            </div>
+            <div class="param-fold">
+                <label class="param-row" style="flex-direction: column; align-items: stretch; gap: 5px;">
+                    <select id="cameraPresetSelect" class="param-select">
+                        <option value="overview">Area level (whole Zuidas)</option>
+                        <option value="block">Block level (single site)</option>
+                        <option value="street-bird">Street bird view</option>
+                        <option value="eye-level">Eye level (1.7 m)</option>
+                        <option value="home">Home / default view</option>
+                    </select>
+                </label>
+                <div class="param-help" id="cameraPresetHelp" style="margin-top: 6px;">
+                    Area level is the pedestrian-flow framing, block level the quality-page
+                    framing, street bird the micro-mobility framing.
+                </div>
+            </div>
         </div>
 
         <!--
@@ -3846,37 +3900,6 @@
             <div class="param-group-divider" id="globalLegendsDivider"></div>
             <div class="param-section-title" style="margin-bottom: 8px;">Global</div>
 
-        <!-- Camera position -->
-        <!--
-          Named framings of the same scene, so a reader can move between the scale
-          levels the assessment is read at without hunting for the right zoom.
-          The four views are not arbitrary: each one is the framing its own
-          assessment page uses, so selecting it here reproduces that page's eye.
-          Reuses the page presets rather than restating coordinates, so a preset
-          that is re-derived (as the street view was, from the Kova run) stays
-          correct here too.
-        -->
-        <div class="param-section" data-global="camera">
-            <div class="param-section-title param-accordion" data-fold-key="camera" aria-expanded="false">
-                <span>Camera position</span><span class="chevron">▶</span>
-            </div>
-            <div class="param-fold">
-                <label class="param-row" style="flex-direction: column; align-items: stretch; gap: 5px;">
-                    <select id="cameraPresetSelect" class="param-select">
-                        <option value="overview">Area level (whole Zuidas)</option>
-                        <option value="block">Block level (single site)</option>
-                        <option value="street-bird">Street bird view</option>
-                        <option value="eye-level">Eye level (1.7 m)</option>
-                        <option value="home">Home / default view</option>
-                    </select>
-                </label>
-                <div class="param-help" id="cameraPresetHelp" style="margin-top: 6px;">
-                    Area level is the pedestrian-flow framing, block level the quality-page
-                    framing, street bird the micro-mobility framing.
-                </div>
-            </div>
-        </div>
-
         <!-- Display modes + transit routes (always relevant) -->
         <div class="param-section" data-global="display">
             <div class="param-section-title param-accordion" data-fold-key="display" aria-expanded="false">
@@ -4276,13 +4299,25 @@
             }
         });
 
-        /** Restore folded state saved from a previous session. */
+        /**
+         * Restore folded state saved from a previous session.
+         *
+         * With nothing saved it falls back to the state in the markup rather than
+         * to closed. The layers and camera cards are marked `aria-expanded="true"`
+         * because they are primary controls, and hard-defaulting to closed here
+         * would silently override that on a reader's first visit.
+         */
         function restorePanelFolds() {
             document.querySelectorAll('#paramPanel .param-accordion').forEach((header) => {
                 const key = header.dataset.foldKey;
-                if (!key) return;
-                let open = false;
-                try { open = sessionStorage.getItem(`pedmodel.panelFold.${key}`) === '1'; } catch (_) { /* ignore */ }
+                const markupDefault = header.getAttribute('aria-expanded') === 'true';
+                let open = markupDefault;
+                if (key) {
+                    try {
+                        const saved = sessionStorage.getItem(`pedmodel.panelFold.${key}`);
+                        if (saved !== null) open = saved === '1';
+                    } catch (_) { /* ignore */ }
+                }
                 const fold = header.parentElement?.querySelector('.param-fold');
                 if (!fold) return;
                 fold.classList.toggle('open', open);

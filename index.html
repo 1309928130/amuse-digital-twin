@@ -1957,7 +1957,11 @@
         */
         #vqAnalytics {
             position: absolute;
-            inset: var(--nav-height) 0 0 0;
+            /* Right edge stops where the panel begins. The layer used to run the
+               full width, which put the index card underneath the panel: the
+               panel is z-index 1000 and this layer is 850, so the card was
+               painted, correct, and completely hidden. */
+            inset: var(--nav-height) var(--right-panel-width) 0 0;
             z-index: 850;
             pointer-events: none;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;

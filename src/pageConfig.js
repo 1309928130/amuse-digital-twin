@@ -634,7 +634,7 @@ register({
     // streetscape until the model is good enough to ship in its place.
     layers: { sunlight: true, urbanHeat: false, networkFlow: false, wind: false, trajectories: true },
     linkTooltip: 'click',
-    sections: ['layers', 'camera', 'legend-visual-quality', 'legend-visual-quality-live', 'legend-visual-quality-index', 'validity'],
+    sections: ['layers', 'camera', 'transport', 'legend-visual-quality', 'legend-visual-quality-live', 'legend-visual-quality-index', 'validity'],
     validity: {
         rating: 'low',
         basis:

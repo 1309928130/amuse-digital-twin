@@ -300,7 +300,7 @@ register({
     camera: { ...OVERVIEW_VIEWPOINT },
     layers: { networkFlow: true, pedDemand: false, urbanHeat: false, sunlight: false, wind: false },
     linkTooltip: 'hover',
-    sections: ['layers', 'flow-scope', 'legend-flow', 'legend-demand', 'meta-flow', 'validity'],
+    sections: ['layers', 'flow-scope', 'legend-flow', 'flow-hour', 'legend-demand', 'meta-flow', 'validity'],
     validity: {
         rating: 'medium',
         basis:
@@ -646,6 +646,7 @@ register({
         'transport',
         'overlap-note',
         'legend-flow',
+        'flow-hour',
         'legend-demand',
         'legend-heat',
         'legend-sunlight',

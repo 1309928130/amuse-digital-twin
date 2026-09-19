@@ -8,6 +8,7 @@ import { PAGES, PAGE_GROUPS, DEFAULT_PAGE_ID, getPage } from './pageConfig.js';
 import { resolveExistingPath, onDataRegistryChange } from './dataRegistry.js';
 import { preloadSunlightMesh } from './sunlightPreload.js';
 import { loadLargeModel, removeLargeModel } from './largeModelLoader.js';
+import { resetHourControls, disposeHourControls } from './flowHourControls.js';
 import { toggleGrasshopperHeat } from './heatmapVisualization.js';
 import { toggleSunlightAnalysis } from './sunlightVisualization.js';
 import {
@@ -421,6 +422,15 @@ export async function applyPageLayers(page) {
     try {
         await toggleNetworkFlow(!!want.networkFlow, { flyTo: false });
         if (flowSwitch) flowSwitch.checked = !!want.networkFlow;
+        if (want.networkFlow) {
+            // The layer has just been (re)built, so the hour controls start from
+            // the all-day view and the chart is redrawn from the new totals.
+            resetHourControls();
+        } else {
+            // Leaving the page must not leave a loop running against a layer that
+            // no longer exists, which would tick forever with nothing to redraw.
+            disposeHourControls();
+        }
     } catch (error) {
         console.warn('[Pages] Network flow failed:', error);
         if (flowSwitch) flowSwitch.checked = false;

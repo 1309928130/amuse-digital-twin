@@ -7,11 +7,21 @@ import { getViewer } from './cesiumViewer.js';
 import { ZUIDAS_BOUNDS } from './config.js';
 
 import { resolveExistingPath } from './dataRegistry.js';
+import { offsetLineRight, joinOffsetsAtNodes, arrowheadAtMidpoint } from './flowGeometry.js';
 
 let flowEnabled = false;
 let demandEnabled = false;
 let flowPolylineCollection = null;
+let flowArrowCollection = null;
 let flowEdges = [];
+/**
+ * One entry per drawn edge: the primitives plus the data behind them.
+ *
+ * Kept as a parallel list so the hour control can recolour without rebuilding
+ * geometry, and so a tooltip can read the same values that were drawn.
+ * @type {{polyline: Object, arrow: Object|null, edge: Object, coords: number[][]}[]}
+ */
+let flowLines = [];
 let spatialCells = new Map(); // "ix,iy" -> edge indices
 let cellSizeDeg = 0.0008;
 let demandEntity = null;
@@ -22,6 +32,51 @@ let tooltipEl = null;
 let highlightPrimitive = null;
 let lastHoverIdx = -1;
 let pinnedTooltip = false;
+
+/**
+ * Sentinal for "no particular hour": show the daily total.
+ *
+ * Deliberately not `null` or `undefined`, because those already have meanings
+ * here, and not `-1`, which would read as a plausible hour to a caller that
+ * forgot to check.
+ */
+export const HOUR_ALL_DAY = 'all-day';
+
+/**
+ * How far each direction is drawn from the road centreline, in metres.
+ *
+ * Matches `OFFSET_DIST_M` in the Python that produced the published maps, so the
+ * two pictures agree. The visible separation is twice this, since the two
+ * directions move to opposite sides.
+ */
+const FLOW_OFFSET_METRES = 1.5;
+
+/**
+ * Height above the ellipsoid for flow lines, in metres.
+ *
+ * The offset already separates the two directions, so this only has to clear the
+ * terrain without floating visibly above it.
+ */
+const FLOW_HEIGHT_METRES = 2.5;
+
+/** Currently rendered hour, or `HOUR_ALL_DAY`. */
+let currentHour = HOUR_ALL_DAY;
+
+/** Cached per-hour network totals; null until the first request. */
+let networkHourTotalsCache = null;
+
+/** Cached peak hour; null until the first request. */
+let networkPeakHourCache = null;
+
+/**
+ * The colour cap in force for the current display.
+ *
+ * Stored rather than recomputed so the highlight can size itself from the same
+ * scale the map is using. Kept in a module variable because `highlightEdge` is
+ * called from a Cesium input handler, which has no access to the return value of
+ * `applyHour`.
+ */
+let highlightCap = 1;
 
 /**
  * Pending hover preview, and the link it belongs to.
@@ -77,9 +132,39 @@ function flowNorm(flow, meta) {
     return Math.min(1, flow / vmax);
 }
 
-function flowWidth(flow, meta) {
-    const t = flowNorm(flow, meta);
-    return 1.5 + t * 6.5;
+/**
+ * Line width for a normalised value in 0..1.
+ *
+ * Split out from `flowWidth` so the hour control can set a width from a value it
+ * has already scaled against that hour's own cap, without re-deriving the cap or
+ * going through a meta object that no longer describes what is on screen.
+ *
+ * @param {number} t Normalised value, 0..1.
+ * @returns {number} Width in pixels.
+ */
+function flowWidthFor(t) {
+    const clamped = Math.max(0, Math.min(1, t));
+    return 1.5 + clamped * 6.5;
+}
+
+/**
+ * Update the legend's stated range to match the hour being shown.
+ *
+ * Without this the legend keeps claiming "0 - <daily P95> ped/day" while the map
+ * is coloured by one hour, so the two disagree exactly when a reader is trying to
+ * use one to interpret the other.
+ *
+ * @param {number} cap The upper bound currently mapped to the top colour.
+ * @param {boolean} allDay Whether the display is the daily total.
+ * @param {number} hour Hour 0-23, when not the daily total.
+ */
+function updateLegendRange(cap, allDay, hour) {
+    const range = document.getElementById('networkFlowLegendRange');
+    if (!range) return;
+    const label = allDay
+        ? 'ped/day (P95 cap)'
+        : `ped/h, ${String(hour).padStart(2, '0')}:00 (P95 of this hour)`;
+    range.textContent = `0 – ${formatFlow(cap)} ${label}`;
 }
 
 function ensureTooltip() {
@@ -121,10 +206,16 @@ function buildTooltipHtml(edge) {
     const hourly = edge.hourly || [];
     const peakHour = hourly.reduce((best, v, i) => (v > (hourly[best] || -1) ? i : best), 0);
     const maxH = Math.max(...hourly, 1e-6);
+    // The hour the map is currently showing, so the tooltip cannot disagree with
+    // the colour of the link under the pointer.
+    const shown = currentHour;
+    const showingOneHour = shown !== HOUR_ALL_DAY;
     const bars = hourly.map((v, h) => {
         const pct = Math.round((v / maxH) * 100);
         const peak = h === peakHour && v > 0 ? 'font-weight:600;color:#FFD54F;' : '';
-        return `<div style="display:flex;align-items:center;gap:6px;margin:1px 0;">
+        const isShown = showingOneHour && h === shown;
+        const row = isShown ? 'background:rgba(255,213,79,0.16);border-radius:3px;' : '';
+        return `<div style="display:flex;align-items:center;gap:6px;margin:1px 0;${row}">
             <span style="width:28px;opacity:0.85;${peak}">${String(h).padStart(2, '0')}</span>
             <div style="flex:1;height:6px;background:rgba(255,255,255,0.12);border-radius:2px;overflow:hidden;">
                 <div style="width:${pct}%;height:100%;background:linear-gradient(90deg,#ffe082,#e53935);"></div>
@@ -133,12 +224,19 @@ function buildTooltipHtml(edge) {
         </div>`;
     }).join('');
 
+    // When one hour is displayed, lead with that hour: it is what the pointer is
+    // asking about, and burying it under the daily total reads as a contradiction.
+    const headline = showingOneHour
+        ? `<div style="margin-bottom:8px;">At <b>${String(shown).padStart(2, '0')}:00</b>: <b>${formatFlow(hourValue(edge, shown))}</b> ped/h<br>
+             <span style="opacity:0.7;">Daily total: ${formatFlow(edge.flow)} ped/day</span></div>`
+        : `<div style="margin-bottom:8px;">Daily flow: <b>${formatFlow(edge.flow)}</b> ped/day</div>`;
+
     return `<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:4px;">
             <div style="font-weight:600;">${name}</div>
             <button type="button" id="networkFlowTooltipClose" style="background:none;border:none;color:#fff;opacity:0.7;cursor:pointer;font-size:16px;line-height:1;padding:0;">×</button>
         </div>
         <div style="opacity:0.8;margin-bottom:6px;">${hwy} · UVK (${edge.u}, ${edge.v}, ${edge.k})</div>
-        <div style="margin-bottom:8px;">Daily flow: <b>${formatFlow(edge.flow)}</b> ped/day</div>
+        ${headline}
         <div style="opacity:0.85;margin-bottom:4px;font-size:11px;">Hourly flow (ped/h)</div>
         ${bars}`;
 }
@@ -195,13 +293,26 @@ function highlightEdge(edge, idx) {
     lastHoverIdx = idx;
     const viewer = getViewer();
     if (!viewer || !edge || !edge.coords || edge.coords.length < 2) return;
+
+    // Drawn on the *offset* line that this edge was rendered as, not on the raw
+    // centreline. Highlighting the centreline would put a white line between the
+    // two directions and undo the separation the layer exists to show.
+    const line = flowLines[idx];
+    const coords = line ? line.coords : edge.coords;
+
     highlightPrimitive = new Cesium.PolylineCollection();
     viewer.scene.primitives.add(highlightPrimitive);
     const flat = [];
-    edge.coords.forEach(([lon, lat]) => flat.push(lon, lat, 5));
+    coords.forEach(([lon, lat]) => flat.push(lon, lat, FLOW_HEIGHT_METRES + 0.2));
+    // Sized from what is currently drawn, so the highlight matches the hour on
+    // screen rather than the daily total it is not showing.
+    const shownValue = currentHour === HOUR_ALL_DAY ? edge.flow : hourValue(edge, currentHour);
+    const cap = currentHour === HOUR_ALL_DAY
+        ? (flowMeta && (flowMeta.flow_p95 || flowMeta.flow_max)) || 1
+        : highlightCap || 1;
     highlightPrimitive.add({
         positions: Cesium.Cartesian3.fromDegreesArrayHeights(flat),
-        width: Math.max(8, flowWidth(edge.flow, flowMeta) + 3),
+        width: Math.max(8, flowWidthFor(cap > 0 ? shownValue / cap : 0) + 3),
         material: Cesium.Material.fromType('Color', {
             color: Cesium.Color.WHITE.withAlpha(0.95),
         }),
@@ -210,8 +321,13 @@ function highlightEdge(edge, idx) {
 
 function buildSpatialIndex(edges) {
     spatialCells = new Map();
+    // Picking is done against the *offset* geometry, so the index is built from
+    // that rather than from the raw centreline. Using the centreline would leave
+    // the drawn lines just outside their own cells, and clicking a link at the far
+    // edge of a cell would miss it.
     edges.forEach((edge, idx) => {
-        const coords = edge.coords;
+        const line = flowLines[idx];
+        const coords = (line && line.coords) || edge.coords;
         if (!coords || coords.length < 2) return;
         let minLon = Infinity;
         let maxLon = -Infinity;
@@ -266,7 +382,11 @@ function findNearestEdge(lon, lat, maxDistDeg = 0.00035) {
     let bestD = maxDistDeg * maxDistDeg;
     candidates.forEach((idx) => {
         const edge = flowEdges[idx];
-        const coords = edge.coords;
+        // Measured against the offset geometry that is actually on screen, so
+        // clicking a link picks the direction drawn under the pointer rather than
+        // whichever of the pair happens to share the centreline.
+        const line = flowLines[idx];
+        const coords = (line && line.coords) || edge.coords;
         for (let i = 0; i < coords.length - 1; i++) {
             const d = distPointToSeg2(
                 lon, lat,
@@ -466,6 +586,20 @@ function attachClickHandler() {
 
 /**
  * Load PedMac network flow edges as colored polylines.
+ *
+ * Two things happen here that did not before.
+ *
+ * **Bidirectional.** Each edge is offset to the right of its own direction of
+ * travel, so the reverse of a two-way street is drawn as a separate line on the
+ * other side rather than hidden underneath. Reciprocal pairs carry different
+ * flows, so without this one direction was simply invisible -- see
+ * `flowGeometry.js` for the full reasoning and for the algorithms, which are
+ * ports of the Python that produced the published maps.
+ *
+ * **Hourly.** Every edge carries a 24-value `hourly` array, so the colouring is
+ * late-bound: the geometry is built once and only the colours change when the
+ * hour changes. That keeps the hour slider responsive, since a recolour does not
+ * need to rebuild 28,000 polylines.
  */
 export async function loadNetworkFlow(jsonPath, options = {}) {
     const viewer = getViewer();
@@ -480,26 +614,71 @@ export async function loadNetworkFlow(jsonPath, options = {}) {
 
     flowPolylineCollection = new Cesium.PolylineCollection();
     viewer.scene.primitives.add(flowPolylineCollection);
+    flowArrowCollection = new Cesium.PolylineCollection();
+    viewer.scene.primitives.add(flowArrowCollection);
     flowEdges = [];
+    flowLines = [];
 
-    edges.forEach((edge) => {
-        if (!edge.coords || edge.coords.length < 2) return;
+    // Geometry is computed per edge, then joined node-by-node. The join needs the
+    // whole set at once, which is why this is two passes rather than one.
+    const staged = edges
+        .filter((edge) => edge.coords && edge.coords.length >= 2)
+        .map((edge) => ({
+            u: edge.u,
+            v: edge.v,
+            coords: offsetLineRight(edge.coords, FLOW_OFFSET_METRES),
+            edge,
+        }));
+
+    const adjusted = joinOffsetsAtNodes(staged, FLOW_OFFSET_METRES);
+    console.log(`[Network Flow] Offset ${staged.length} edges, joined ${adjusted} endpoints at nodes`);
+
+    for (const item of staged) {
+        const { coords, edge } = item;
         const flat = [];
-        edge.coords.forEach(([lon, lat]) => flat.push(lon, lat, 3));
-        flowPolylineCollection.add({
+        // Slightly above the ground; the offset already separates the directions,
+        // so this only has to clear terrain, not another line.
+        coords.forEach(([lon, lat]) => flat.push(lon, lat, FLOW_HEIGHT_METRES));
+
+        const polyline = flowPolylineCollection.add({
             positions: Cesium.Cartesian3.fromDegreesArrayHeights(flat),
-            width: flowWidth(edge.flow, flowMeta),
+            // Placeholder width; `applyHour` below sets the real one from the
+            // value for whichever hour is being displayed.
+            width: 1.5,
             material: Cesium.Material.fromType('Color', {
                 color: lerpColor(flowNorm(edge.flow, flowMeta)),
             }),
         });
+
+        // The arrow is placed on the offset line, so it points along the direction
+        // this edge is actually walked -- which is the whole point of drawing the
+        // two directions apart.
+        const arrowCoords = arrowheadAtMidpoint(coords);
+        let arrow = null;
+        if (arrowCoords) {
+            const arrowFlat = [];
+            arrowCoords.forEach(([lon, lat]) => arrowFlat.push(lon, lat, FLOW_HEIGHT_METRES));
+            arrow = flowArrowCollection.add({
+                positions: Cesium.Cartesian3.fromDegreesArrayHeights(arrowFlat),
+                width: 1.6,
+                material: Cesium.Material.fromType('Color', {
+                    color: Cesium.Color.WHITE.withAlpha(0.75),
+                }),
+            });
+        }
+
         flowEdges.push(edge);
-    });
+        flowLines.push({ polyline, arrow, edge, coords });
+    }
 
     buildSpatialIndex(flowEdges);
     flowEnabled = true;
     showFlowLegend(flowMeta);
     attachClickHandler();
+
+    // Start at the daily total, which is what the page showed before the hour
+    // control existed, so the default reading is unchanged.
+    applyHour(HOUR_ALL_DAY);
 
     if (options.flyTo === true) {
         viewer.camera.flyTo({
@@ -517,18 +696,161 @@ export async function loadNetworkFlow(jsonPath, options = {}) {
     return flowEdges.length;
 }
 
+/**
+ * Recolour and rescale the network for a given hour.
+ *
+ * `HOUR_ALL_DAY` restores the daily totals, which is the reading the page had
+ * before the hour control existed. Otherwise the per-edge `hourly` value for that
+ * hour is used for both colour and width, scaled against the same hour across the
+ * whole network so hours stay comparable with each other.
+ *
+ * Mutating the existing primitives keeps this cheap enough to run on every slider
+ * step: no geometry is rebuilt, only a colour and a width per line.
+ *
+ * @param {number} hour Hour 0-23, or `HOUR_ALL_DAY`.
+ * @returns {Object} Summary `{ hour, total, range, peakHour }` for the panel.
+ */
+export function applyHour(hour) {
+    currentHour = hour;
+    if (!flowLines.length) return null;
+
+    const allDay = hour === HOUR_ALL_DAY;
+
+    // Scale against this hour's own P95 rather than the daily P95, or a quiet hour
+    // would render almost uniformly pale and the pattern would be invisible.
+    const values = flowLines.map(({ edge }) =>
+        allDay ? edge.flow : hourValue(edge, hour)
+    );
+    const cap = allDay
+        ? (flowMeta.flow_p95 || flowMeta.flow_max || 1)
+        : percentile(values, 0.95) || 1;
+
+    let total = 0;
+    let max = 0;
+    flowLines.forEach(({ polyline, arrow, edge }) => {
+        const value = allDay ? edge.flow : hourValue(edge, hour);
+        total += value;
+        if (value > max) max = value;
+
+        const t = cap > 0 ? Math.min(1, value / cap) : 0;
+        polyline.material = Cesium.Material.fromType('Color', { color: lerpColor(t) });
+        polyline.width = flowWidthFor(t);
+        // Fade the arrow out with the flow, so an empty hour does not show a
+        // network of confident white arrowheads over invisible links.
+        if (arrow) arrow.material = Cesium.Material.fromType('Color', {
+            color: Cesium.Color.WHITE.withAlpha(0.2 + 0.6 * t),
+        });
+    });
+
+    // Keep the tooltip and the spatial index reading the same numbers that are
+    // drawn, so a link's readout matches its colour.
+    highlightCap = cap;
+    updateLegendRange(cap, allDay, hour);
+
+    return {
+        hour,
+        total,
+        max,
+        cap,
+        peakHour: networkPeakHour(),
+        allDay,
+    };
+}
+
+/**
+ * Flow for one edge at one hour.
+ *
+ * Falls back to the daily total spread evenly across the day when an edge has no
+ * hourly array, so a partial dataset still renders rather than disappearing.
+ *
+ * @param {Object} edge Flow edge.
+ * @param {number} hour Hour 0-23.
+ * @returns {number} Pedestrians per hour.
+ */
+export function hourValue(edge, hour) {
+    const hourly = edge.hourly;
+    if (!Array.isArray(hourly) || hourly.length !== 24) {
+        return Number.isFinite(edge.flow) ? edge.flow / 24 : 0;
+    }
+    const v = hourly[hour];
+    return Number.isFinite(v) ? v : 0;
+}
+
+/**
+ * The hour with the highest network-wide flow.
+ *
+ * Computed once and cached, because it cannot change: it depends only on the
+ * loaded dataset, and the chart marks it on every render.
+ *
+ * @returns {number} Hour 0-23.
+ */
+export function networkPeakHour() {
+    if (networkPeakHourCache !== null) return networkPeakHourCache;
+    const totals = networkHourTotals();
+    let best = 0;
+    for (let h = 1; h < 24; h++) {
+        if (totals[h] > totals[best]) best = h;
+    }
+    networkPeakHourCache = best;
+    return best;
+}
+
+/**
+ * Network-wide flow for each of the 24 hours.
+ *
+ * This is what the panel's bar chart plots: every edge's contribution summed by
+ * hour, so the shape of the day is visible at a glance and the current hour can
+ * be marked on it.
+ *
+ * @returns {number[]} 24 totals, in pedestrians per hour.
+ */
+export function networkHourTotals() {
+    if (networkHourTotalsCache) return networkHourTotalsCache;
+    const totals = new Array(24).fill(0);
+    for (const { edge } of flowLines) {
+        for (let h = 0; h < 24; h++) totals[h] += hourValue(edge, h);
+    }
+    networkHourTotalsCache = totals;
+    return totals;
+}
+
+/**
+ * The value at a given percentile of an unsorted list.
+ *
+ * Used to derive the colour cap per hour. Nearest-rank rather than interpolated,
+ * which is accurate enough for a colour scale and avoids a second array copy on
+ * a path that runs on every slider step.
+ *
+ * @param {number[]} values Values.
+ * @param {number} p Percentile as a fraction, e.g. 0.95.
+ * @returns {number} The value at that percentile, or 0 for an empty list.
+ */
+function percentile(values, p) {
+    if (!values.length) return 0;
+    const sorted = [...values].sort((a, b) => a - b);
+    const idx = Math.min(sorted.length - 1, Math.max(0, Math.round(p * (sorted.length - 1))));
+    return sorted[idx];
+}
+
 export function clearNetworkFlow() {
     const viewer = getViewer();
     detachClickHandler();
-    if (flowPolylineCollection && viewer) {
-        try { viewer.scene.primitives.remove(flowPolylineCollection); } catch (_) { /* ignore */ }
-        try { flowPolylineCollection.destroy(); } catch (_) { /* ignore */ }
+    for (const collection of [flowPolylineCollection, flowArrowCollection]) {
+        if (collection && viewer) {
+            try { viewer.scene.primitives.remove(collection); } catch (_) { /* ignore */ }
+            try { collection.destroy(); } catch (_) { /* ignore */ }
+        }
     }
     flowPolylineCollection = null;
+    flowArrowCollection = null;
     flowEdges = [];
+    flowLines = [];
     spatialCells = new Map();
     flowEnabled = false;
     flowMeta = null;
+    currentHour = HOUR_ALL_DAY;
+    networkHourTotalsCache = null;
+    networkPeakHourCache = null;
     hideFlowLegend();
 }
 

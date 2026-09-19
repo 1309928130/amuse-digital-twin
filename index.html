@@ -1115,6 +1115,17 @@
             background: rgba(0, 0, 0, 0.05);
             border-color: rgba(0, 0, 0, 0.18);
         }
+        /* Two actions side by side under the hour slider. The base class is
+           full-width and block, which is right for a lone action but would stack
+           these, so they share the row instead. */
+        .param-action-btn.flow-hour-btn {
+            display: inline-block;
+            flex: 1 1 0;
+            width: auto;
+            min-width: 0;
+            margin-top: 0;
+            padding: 6px 8px;
+        }
         /* Sits under a control as its caption, so it is tighter than the
            standalone help text it follows. */
         .param-help-tight {
@@ -3222,6 +3233,48 @@
             <div class="legend-bar" id="panelledFlowBar"></div>
             <div class="legend-scale"><span>0</span><span id="panelledFlowMax">…</span></div>
             <div class="param-help">pedestrians / day (P95 cap), YlOrRd</div>
+        </div>
+
+        <!-- Section: flow hour -->
+        <!--
+          Shown only on pages that draw the flow network. The network ships with a
+          24-value hourly array per edge, so this recolours the same geometry
+          rather than reloading it, which is why the slider can be dragged.
+        -->
+        <div class="param-section" data-section-id="flow-hour">
+            <div class="param-section-title">Hour of day</div>
+            <div style="display:flex;align-items:center;gap:8px;margin:6px 0 2px;">
+                <input type="range" id="flowHourRange" min="0" max="24" step="1" value="24"
+                       style="flex:1;min-width:0;">
+                <output id="flowHourValue" style="min-width:58px;text-align:right;font-variant-numeric:tabular-nums;">All day</output>
+            </div>
+            <div style="display:flex;gap:6px;margin:6px 0 4px;">
+                <button type="button" id="flowHourPlay" class="param-action-btn flow-hour-btn">▶ Play</button>
+                <button type="button" id="flowHourReset" class="param-action-btn flow-hour-btn">All day</button>
+            </div>
+            <!--
+              The 24-hour profile of the whole network, drawn as an SVG. It gives
+              the slider somewhere to point: without it a reader dragging the
+              control sees colours change but has no idea where the busy hours
+              are, or whether the hour they landed on is a peak or a lull.
+            -->
+            <div id="flowHourChartWrap" style="margin-top:6px;">
+                <svg id="flowHourChart" viewBox="0 0 240 58" preserveAspectRatio="none"
+                     style="width:100%;height:58px;display:block;overflow:visible;"
+                     role="img" aria-label="Network pedestrian flow by hour of day">
+                    <g id="flowHourChartBars"></g>
+                    <line id="flowHourChartMarker" x1="0" y1="0" x2="0" y2="46"
+                          stroke="#FFD54F" stroke-width="1.5" style="display:none;"></line>
+                </svg>
+                <div style="display:flex;justify-content:space-between;font-size:10px;opacity:0.7;margin-top:1px;">
+                    <span>00</span><span>06</span><span>12</span><span>18</span><span>23</span>
+                </div>
+                <div id="flowHourChartCaption" class="param-help" style="margin-top:4px;">…</div>
+            </div>
+            <div class="param-help" style="margin-top:6px;">
+                Each direction of a two-way link is drawn on its own side, offset 1.5 m
+                from the centreline, with the arrowhead showing which way it flows.
+            </div>
         </div>
 
         <!-- Section: demand legend -->

@@ -617,6 +617,16 @@ register({
     // eye height; a camera above the street shows the layout rather than the
     // view. The `eye-level` global preset moves here too, so the two agree.
     camera: { ...EYE_LEVEL_VIEW },
+    // Walking figures, not dots, for the same reason as the micro-mobility page:
+    // this is read at eye level, and an 8-pixel dot is not something a pedestrian
+    // would recognise as another person.
+    //
+    // The dots were actively wrong here. They sit at 1.5 m, the camera at 1.7 m,
+    // so a dot 100 m down the street subtends about 0.1 degrees and lands in a
+    // fifteen-pixel band on the horizon, behind every building between the two.
+    // The layer was drawing all 36 of them and the page looked empty. A figure is
+    // 1.8 m of vertical silhouette, which survives the same geometry.
+    avatarMode: 'figure',
     // The sunlight mesh is the only 3D model that loads on this page. It is on
     // by default for the same reason it is on every other quality page: at eye
     // level, with an empty scene, a pedestrian count gives no sense of what the

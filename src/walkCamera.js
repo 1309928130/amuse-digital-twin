@@ -83,6 +83,18 @@ const LOOK_AHEAD_M = 12;
  */
 const LOOK_SMOOTHING_M = 18;
 
+/**
+ * Pitch while walking, in degrees below the horizon.
+ *
+ * Matches `EYE_LEVEL_VIEW.pitchDeg` in `pageConfig.js`. The earlier version
+ * aimed the camera at a point 0.6 m below eye height a few metres ahead, which
+ * produced about -26 deg of pitch once the look-ahead collapsed on a lattice
+ * zig-zag -- far too much toward the ground for a standing eye. Setting pitch
+ * explicitly keeps the framing level regardless of how short the ahead sample
+ * momentarily is.
+ */
+const WALK_PITCH_DEG = -2.0;
+
 /** Default walking speed, in metres per second. Matches the run's median. */
 const DEFAULT_SPEED_MPS = 1.2;
 
@@ -92,6 +104,14 @@ let cumulative = null;
 let travelled = 0;
 let speedMps = DEFAULT_SPEED_MPS;
 let playing = false;
+/** True while `startWalkCamera` is awaiting data. Lets Stop cancel a start that
+    has not yet set `playing`, which is the race that left the walk running after
+    the button already said Stop. */
+let startPending = false;
+/** Bumped on every stop so a stale `preRender` callback from a previous start
+    becomes a no-op even if Cesium has not yet dropped it. */
+let walkGeneration = 0;
+let activeGeneration = 0;
 let preRenderRemove = null;
 let lastTime = 0;
 let loadedAgents = null;
@@ -273,19 +293,19 @@ function pointAtDistance(distance, out) {
 /**
  * Average direction over a span ahead, for a stable look-at point.
  *
- * Averaging over a window of arc length rather than sampling one distant point
- * is what stops the view swinging side to side. On Kova's lattice a single
- * look-ahead point can sit on the far side of the next zig-zag, and the camera
- * would follow that zig-zag; a window average crosses the zig-zags instead.
+ * The sample is centred `LOOK_AHEAD_M` metres down the route, then averaged over
+ * `LOOK_SMOOTHING_M` so lattice zig-zags cancel. The previous version averaged
+ * from the *current* position, which put the midpoint only ~9 m ahead and --
+ * when the path doubled back on itself -- collapsed that to ~1 m, pitching the
+ * camera hard into the ground.
  *
  * @param {number} from Arc length to look from.
  * @returns {Object} `Cartographic` look-at position.
  */
 function lookAheadPoint(from) {
-    const a = pointAtDistance(from, scratchCartoA);
-    const b = pointAtDistance(from + LOOK_SMOOTHING_M, scratchCartoB);
-    // Midpoint of the window, so the target leads the camera without lagging a
-    // full smoothing span behind it.
+    const centre = from + LOOK_AHEAD_M;
+    const a = pointAtDistance(centre - LOOK_SMOOTHING_M / 2, scratchCartoA);
+    const b = pointAtDistance(centre + LOOK_SMOOTHING_M / 2, scratchCartoB);
     Cesium.Cartographic.fromDegrees(
         (a.longitude + b.longitude) / 2,
         (a.latitude + b.latitude) / 2,
@@ -302,7 +322,10 @@ function lookAheadPoint(from) {
  * same frame it is drawn and cannot judder against the render loop.
  */
 function step() {
-    if (!playing || !route || routeLength <= 0) return;
+    // Generation check first: a stop bumps `walkGeneration`, so a listener that
+    // Cesium has not yet dropped becomes a silent no-op rather than advancing
+    // the camera after the button already said Stop.
+    if (!playing || activeGeneration !== walkGeneration || !route || routeLength <= 0) return;
 
     const now = performance.now();
     // First frame after a start has no previous timestamp, so nothing is moved;
@@ -334,53 +357,40 @@ function step() {
     // calls it internally -- so the two positions must be read out as plain
     // numbers before anything else runs. Holding both objects at once meant the
     // look-ahead overwrote the eye, the direction collapsed to zero length, and
-    // `setView` fell back to looking straight down at the pavement (measured
-    // pitch: -90 deg on level ground, with no horizon in frame).
+    // `setView` fell back to looking straight down at the pavement.
     const eyeScratch = pointAtDistance(travelled, scratchCarto);
     const eyeLon = eyeScratch.longitude;
     const eyeLat = eyeScratch.latitude;
     const target = lookAheadPoint(travelled);
     const targetLon = target.longitude;
     const targetLat = target.latitude;
-    const height = EYE_HEIGHT_M;
-    // The look-at point sits below eye height so the framing tilts slightly toward
-    // the street being walked rather than holding the horizon mid-frame. A 12 m
-    // look-ahead with a 0.6 m drop is a gentle walking gaze, not a downward stare.
-    const targetHeight = EYE_HEIGHT_M - 0.6;
 
     const viewer = getViewer();
     const camera = viewer && viewer.camera;
     if (!camera) return;
 
-    // Direction is applied with `setView` rather than `camera.lookAt`. `lookAt`
-    // installs a reference frame on the camera, and clearing it afterwards with
-    // `lookAtTransform(IDENTITY)` undoes the position `lookAt` just set -- the
-    // camera was thrown far off the globe (measured: 2.7 million metres up).
-    // Setting position and direction outright needs no frame bookkeeping.
-    const eyeCartesian = Cesium.Cartesian3.fromRadians(eyeLon, eyeLat, height);
-    const lookCartesian = Cesium.Cartesian3.fromRadians(targetLon, targetLat, targetHeight);
-    const direction = Cesium.Cartesian3.subtract(
-        lookCartesian,
-        eyeCartesian,
-        new Cesium.Cartesian3()
-    );
-    Cesium.Cartesian3.normalize(direction, direction);
-    // Degenerate when the two points coincide, which only happens on a
-    // zero-length route; leaving the previous direction is the safe response.
-    if (!Number.isFinite(direction.x) || Cesium.Cartesian3.equalsEpsilon(direction, Cesium.Cartesian3.ZERO, 1e-8)) {
-        return;
-    }
+    const eyeCartesian = Cesium.Cartesian3.fromRadians(eyeLon, eyeLat, EYE_HEIGHT_M);
 
-    // Up is the geodetic surface normal, so the horizon stays level on the globe
-    // instead of the camera rolling with the route's bearing.
-    const up = Cesium.Ellipsoid.WGS84.geodeticSurfaceNormal(
-        eyeCartesian,
-        new Cesium.Cartesian3()
+    // Heading from the geodetic bearing to the look-ahead point, pitch fixed at
+    // `WALK_PITCH_DEG`. Computing pitch from a look-at with a height drop made
+    // the framing depend on how far ahead the sample landed; on lattice
+    // zig-zags that distance collapsed and the camera pitched hard into the
+    // ground (measured ~-26 deg). A fixed pitch matching the eye-level preset
+    // keeps the horizon in frame regardless.
+    const dLon = targetLon - eyeLon;
+    const dLat = targetLat - eyeLat;
+    const heading = Math.atan2(
+        dLon * Math.cos(eyeLat),
+        dLat
     );
 
     camera.setView({
         destination: eyeCartesian,
-        orientation: { direction, up },
+        orientation: {
+            heading,
+            pitch: Cesium.Math.toRadians(WALK_PITCH_DEG),
+            roll: 0,
+        },
     });
 }
 
@@ -404,7 +414,7 @@ export function onWalkStateChange(fn) {
 /** Notify listeners of the current state. */
 function emitState() {
     const state = {
-        playing,
+        playing: playing || startPending,
         progress: routeLength > 0 ? travelled / routeLength : 0,
         routeIndex: activeRouteIndex,
     };
@@ -424,19 +434,45 @@ function emitState() {
  */
 export async function startWalkCamera() {
     if (playing) return true;
+    startPending = true;
+    // Capture the generation at the start of this attempt. A Stop clicked while
+    // we are still awaiting data bumps `walkGeneration`, and the check below
+    // refuses to arm the listener -- that is what made Stop actually stop when
+    // the button was hit during the async load.
+    const generation = walkGeneration;
 
     if (!route) {
         const index = activeRouteIndex >= 0 ? activeRouteIndex : await pickDefaultRoute();
-        if (index < 0 || !(await setWalkRoute(index))) return false;
+        if (index < 0 || !(await setWalkRoute(index))) {
+            startPending = false;
+            return false;
+        }
+    }
+    // Cancelled while loading.
+    if (generation !== walkGeneration) {
+        startPending = false;
+        return false;
     }
     // A walk that finished, or that was stopped at the end, restarts from the
     // beginning; resuming from the end would look like the button does nothing.
     if (travelled >= routeLength) travelled = 0;
 
     const viewer = getViewer();
-    if (!viewer) return false;
+    if (!viewer) {
+        startPending = false;
+        return false;
+    }
+
+    // Drop any leftover listener before arming a new one. Without this a failed
+    // stop (or a double-start race) could leave two `step` callbacks running.
+    if (preRenderRemove) {
+        try { preRenderRemove(); } catch (_) { /* ignore */ }
+        preRenderRemove = null;
+    }
 
     playing = true;
+    startPending = false;
+    activeGeneration = generation;
     // Cleared so the first step measures elapsed time from now, not from the
     // last time the walk ran.
     lastTime = 0;
@@ -450,13 +486,23 @@ export async function startWalkCamera() {
  *
  * Deliberately does not restore the previous view: the point of the feature is
  * to look from somewhere new, so throwing that away on stop would be hostile.
+ *
+ * Also cancels an in-flight start: bumping `walkGeneration` makes a start that
+ * is still awaiting data refuse to arm its listener when it resumes.
  */
 export function stopWalkCamera() {
-    if (!playing) return;
+    startPending = false;
+    walkGeneration += 1;
     playing = false;
     if (preRenderRemove) {
-        preRenderRemove();
+        try { preRenderRemove(); } catch (_) { /* ignore */ }
         preRenderRemove = null;
+    }
+    // Belt and braces: remove by function reference too, in case the remover
+    // returned by `addEventListener` is a no-op in some Cesium builds.
+    const viewer = getViewer();
+    if (viewer && viewer.scene && viewer.scene.preRender.removeEventListener) {
+        try { viewer.scene.preRender.removeEventListener(step); } catch (_) { /* ignore */ }
     }
     emitState();
 }
@@ -534,13 +580,24 @@ export async function initWalkCamera() {
     const speedValue = document.getElementById('walkSpeedValue');
 
     toggle.addEventListener('click', async () => {
-        if (playing) {
+        // Treat a pending start the same as playing: the button already reads as
+        // Stop (or the user intends to cancel), and without this a click during
+        // the async load would fire a *second* start instead of cancelling.
+        if (playing || startPending) {
             stopWalkCamera();
-        } else {
-            const started = await startWalkCamera();
-            if (!started) {
-                toggle.textContent = 'No route available';
-            }
+            return;
+        }
+        // Flip the label immediately so a second click during the await is
+        // clearly a Stop, and so the user sees a response before the data load
+        // finishes.
+        toggle.textContent = 'Stop walk-through';
+        startPending = true;
+        emitState();
+        const started = await startWalkCamera();
+        if (!started && !playing) {
+            toggle.textContent = 'No route available';
+            startPending = false;
+            emitState();
         }
     });
 

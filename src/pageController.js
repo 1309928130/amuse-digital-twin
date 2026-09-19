@@ -20,7 +20,7 @@ import {
     startVisualQualityAnalytics,
 } from './visualQualityAnalytics.js';
 import { initCameraPresets } from './cameraPresets.js';
-import { initWalkCamera } from './walkCamera.js';
+import { initWalkCamera, stopWalkCamera } from './walkCamera.js';
 import { toggleGrasshopperHeat } from './heatmapVisualization.js';
 import { toggleSunlightAnalysis } from './sunlightVisualization.js';
 import {
@@ -991,6 +991,11 @@ export async function gotoPage(pageId, options = {}) {
     // here than for the purely presentational overlays: leaving it running would
     // keep competing with the renderer for a page that no longer shows it.
     closeVisualQualityAnalytics();
+    // The walk-through only belongs on the visual-quality page. Leaving it
+    // running after a page change would keep moving the camera under a view
+    // that no longer shows the control, which is exactly the "I clicked stop
+    // but it kept playing" feeling when the user navigates away mid-walk.
+    stopWalkCamera();
 
     if (page.doc) {
         await openDoc({ source: page.doc.source, title: page.doc.title || page.title });

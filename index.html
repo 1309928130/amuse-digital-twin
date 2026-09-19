@@ -3487,10 +3487,12 @@
             camera goes where pedestrians actually went.
         -->
         <div class="param-section" data-section-id="walkcam">
-            <div class="param-section-title param-accordion" data-fold-key="walkcam" aria-expanded="false">
+            <!-- Open by default on the visual-quality page: the control only
+                 appears there, and a collapsed header is easy to miss. -->
+            <div class="param-section-title param-accordion" data-fold-key="walkcam" aria-expanded="true">
                 <span>Walk-through camera</span><span class="chevron">▶</span>
             </div>
-            <div class="param-fold">
+            <div class="param-fold open">
                 <button type="button" id="walkToggle" class="param-action-btn flow-hour-btn" style="width:100%;margin:2px 0 6px;">
                     Play walk-through
                 </button>

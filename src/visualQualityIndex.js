@@ -39,8 +39,6 @@
  * saturates is clamped rather than allowed to run away.
  */
 
-import { applyCameraPreset } from './cameraPresets.js';
-
 /**
  * The index terms, their default weights, and how each is described.
  *
@@ -240,11 +238,6 @@ function buildWeightControls() {
  */
 export function initVisualQualityIndex() {
     buildWeightControls();
-    const eye = document.getElementById('vqDetectEye');
-    if (eye && !eye.dataset.vqWired) {
-        eye.dataset.vqWired = '1';
-        eye.addEventListener('click', () => applyCameraPreset('eye-level'));
-    }
     renderFormula();
     renderIndex();
 }

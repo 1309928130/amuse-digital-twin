@@ -156,6 +156,27 @@ export async function loadSunlightAnalysis(options = {}) {
 
     hideDesignGlbs(options.designEntities || []);
 
+    // ## Why the failsafe is short here
+    //
+    // `loadLargeModel` waits on a readiness signal that Cesium does not provide
+    // for these models. Measured on this mesh and on the Zuidas massing:
+    //
+    //   * `entity.model` is a `ModelGraphics` -- the *description* -- and has no
+    //     `ready` and no `readyPromise`, so the loader's promise branch is never
+    //     taken.
+    //   * It falls through to polling `model.ready`, which never becomes true.
+    //   * `Cesium.Model.fromGltfAsync` is no better: it resolves immediately to
+    //     an unpopulated object with no `readyPromise`.
+    //
+    // So there is nothing to wait for, and the timeout is the *entire* wait
+    // rather than a safety net. The mesh is composited by Cesium on its own
+    // schedule regardless, which is why the page works today.
+    //
+    // Left at the 12 s default this blocked the page for 12 s every time. The
+    // value below only has to be long enough that a fast machine settles before
+    // it, so it trades a little certainty about timing for a much shorter block
+    // -- and `preloadSunlightMesh` moves the bytes earlier so there is less to
+    // wait for in the first place.
     let entity;
     try {
         entity = await loadLargeModel(glbUrl, position, {
@@ -171,8 +192,15 @@ export async function loadSunlightAnalysis(options = {}) {
             // Keep material as exported (do not force white)
             color: null,
             opacity: 1.0,
-            // Local asset: don't wait for Cesium's readyPromise (it can stall here)
-            readyTimeoutMs: 1500,
+            // No loading banner. The mesh is pre-warmed by
+            // `preloadSunlightMesh` and Cesium composites it as soon as it can,
+            // so a "Loading ..." notice would appear and vanish within a frame
+            // or two -- which reads as a glitch rather than as progress. The
+            // other callers still show one, where the wait is real.
+            showLoadingIndicator: false,
+            // Retained for compatibility with the loader's signature. Nothing
+            // blocks on it any more; see the note in `loadLargeModel`.
+            readyTimeoutMs: 1200,
         });
     } catch (error) {
         // Do not leave the design massing hidden if the mesh failed to load

@@ -5,7 +5,8 @@
 
 import { getViewer } from './cesiumViewer.js';
 import { PAGES, PAGE_GROUPS, DEFAULT_PAGE_ID, getPage } from './pageConfig.js';
-import { resolveExistingPath } from './dataRegistry.js';
+import { resolveExistingPath, onDataRegistryChange } from './dataRegistry.js';
+import { preloadSunlightMesh } from './sunlightPreload.js';
 import { loadLargeModel, removeLargeModel } from './largeModelLoader.js';
 import { toggleGrasshopperHeat } from './heatmapVisualization.js';
 import { toggleSunlightAnalysis } from './sunlightVisualization.js';
@@ -14,6 +15,7 @@ import {
     togglePedestrianDemand,
     setFlowTooltipMode,
 } from './pedFlowVisualization.js';
+import { toggleTrajectories, getTrajectoryMeta, hasTrajectories, setAvatarMode, getAvatarLabel, getOscillatingCount } from './trajectoryVisualization.js';
 import {
     showWindField,
     clearWindField,
@@ -27,6 +29,7 @@ import {
     initializeCaseStudies,
     setCaseStudiesVisible,
     setActiveStudy,
+    buildCaseStudiesToc,
 } from './caseStudies.js';
 
 const ACTIVE_PAGE_KEY = 'pedmodel.visualization.activePage';
@@ -229,6 +232,15 @@ export function applyPageCamera(page, options = {}) {
 /** Ensure the design GLB is available (page layers hide/show it themselves). */
 async function ensureDesignModel() {
     if (designEntities.length) return designEntities;
+    // A massing the viewer already put in the scene counts. The startup path in
+    // `main.js` loads the same GLB through its own call, so without this check
+    // the guard above never fires for it and a second copy gets loaded on top
+    // of the first -- two full-size models in the same place.
+    const existing = otherPanelGeometry();
+    if (existing.length) {
+        designEntities = existing;
+        return designEntities;
+    }
     try {
         const entity = await loadLargeModel(
             LARGE_MODEL_CONFIG.modelPaths[0],
@@ -286,6 +298,100 @@ function otherPanelGeometry() {
 }
 
 /**
+ * Fill the trajectory legend from the loaded Kova payload.
+ *
+ * The agent count is the number worth showing: the avatars identify individuals, so
+ * there is no value ramp to label. The units line is the load-bearing part — it says
+ * "per iteration" because Kova defines no wall-clock duration, and it switches to
+ * seconds only when the export carries a calibrated value. Saying "per iteration" for
+ * data already converted to seconds would be wrong in the other direction, so the two
+ * cases are distinguished rather than collapsed into one label.
+ */
+function applyTrajectoryLegend(shown) {
+    const countEl = document.getElementById('trajectoryAgentCount');
+    const unitsEl = document.getElementById('trajectoryUnits');
+    const figureEl = document.getElementById('trajectoryFigure');
+    const oscillatingEl = document.getElementById('trajectoryOscillating');
+    const meta = getTrajectoryMeta();
+
+    if (!shown || !meta || !hasTrajectories()) {
+        if (countEl) countEl.textContent = 'no data';
+        if (unitsEl) unitsEl.textContent = 'no Kova run exported for this proposal';
+        if (figureEl) figureEl.style.display = 'none';
+        if (oscillatingEl) oscillatingEl.style.display = 'none';
+        return;
+    }
+    if (countEl) countEl.textContent = `${meta.n_agents} agents`;
+    if (unitsEl) {
+        // The export writes `meta.nominal_seconds_per_iteration`; an earlier
+        // reader looked for `meta.seconds_per_iteration`, which never matched,
+        // so the panel silently claimed the speeds were per-iteration while the
+        // file held metres per second. Reading the real key is what keeps the
+        // legend and the payload describing the same quantity.
+        const secondsPerIteration = meta.nominal_seconds_per_iteration;
+        unitsEl.textContent = secondsPerIteration
+            ? `speeds: m/s (nominal ${secondsPerIteration} s per iteration)`
+            : 'speeds: metres per iteration (Kova defines no wall-clock time)';
+    }
+    // Whether any agent in this run is oscillating rather than walking.
+    //
+    // This matters more than any other line in the panel: an oscillating agent
+    // produces normal step lengths and a normal-looking speed, so the run reads
+    // as healthy while most of the paths cover no ground. Reporting the count
+    // here means a reader learns it from the legend rather than from a
+    // diagnostic they would have to go looking for.
+    if (oscillatingEl) {
+        const n = getOscillatingCount();
+        if (n > 0) {
+            oscillatingEl.textContent =
+                `${n} of ${meta.n_agents} paths are grey: their trace returns near ` +
+                'where it began, so they may not have reached a destination. Grey is ' +
+                'a prompt to inspect the run, not a verdict — coarse sampling can ' +
+                'grey a genuine walk.';
+            oscillatingEl.style.display = '';
+        } else {
+            oscillatingEl.style.display = 'none';
+        }
+    }
+    // Which figure is on screen. A fetched walking model and a procedural
+    // mannequin are different claims about what the viewer shows, so the panel
+    // names one rather than leaving the reader to guess. "loading" stays a
+    // distinct state so the panel does not assert a mannequin mid-fetch.
+    if (figureEl) {
+        const label = getAvatarLabel();
+        if (label) {
+            figureEl.textContent = label === 'loading' ? 'figures: loading…' : `figures: ${label}`;
+            figureEl.style.display = '';
+        } else {
+            figureEl.style.display = 'none';
+        }
+    }
+}
+
+/**
+ * The walk-around viewpoint on the micro-mobility page.
+ *
+ * Everything else on that page is framed from above, which is the right way to
+ * read a plan but the wrong way to read a walk: from 400 m up, a person is
+ * sub-pixel and the CA's behaviour — queueing, avoiding, following — is
+ * invisible. This preset drops the camera to a little above head height and
+ * pulls it back to the edge of the square, so the agents are seen roughly as a
+ * passer-by would see them, from enough distance to watch several at once.
+ *
+ * It is deliberately reached by a button rather than being the page's default.
+ * The plan view is what the page is for; this is an additional reading, so the
+ * camera is offered as an option and left alone until asked for.
+ *
+ * @type {Object}
+ */
+/**
+ * The street-level camera preset lives in `pageConfig.js` with the other camera
+ * definitions, so a reader looking for "where does this page point" finds all of
+ * them in one place. Only the flight is implemented here, because the camera
+ * transition is the controller's job.
+ */
+
+/**
  * Apply the layer set declared by a page. Runs sequentially so Cesium does not
  * fight over the same primitives.
  * @param {import('./pageConfig.js').PageDef} page
@@ -312,6 +418,23 @@ export async function applyPageLayers(page) {
     } catch (error) {
         console.warn('[Pages] Pedestrian demand failed:', error);
         if (demandSwitch) demandSwitch.checked = false;
+    }
+
+    // --- Kova agent trajectories (micro-mobility) ---
+    // Absent for every proposal without a Kova run, which is why the return value
+    // is ignored: the page falls back to its placeholder text instead.
+    const trajectorySwitch = document.getElementById('trajectoriesSwitch');
+    try {
+        // Dots or walking figures is a page-level choice, applied before the
+        // layer is shown so the first render already uses the right symbol and
+        // the layer does not flash dots and then swap them for figures.
+        await setAvatarMode(page.avatarMode || 'dot');
+        const shown = await toggleTrajectories(!!want.trajectories);
+        if (trajectorySwitch) trajectorySwitch.checked = !!want.trajectories && shown;
+        applyTrajectoryLegend(shown);
+    } catch (error) {
+        console.warn('[Pages] Agent trajectories failed:', error);
+        if (trajectorySwitch) trajectorySwitch.checked = false;
     }
 
     // --- Urban heat (Ladybug arrow field) ---
@@ -362,6 +485,18 @@ export async function applyPageLayers(page) {
     } catch (error) {
         console.warn('[Pages] Pollution failed:', error);
         if (pollutionSwitch) pollutionSwitch.checked = false;
+    }
+
+    // --- Design massing (Zuidas Datamodel) ---
+    // Pages that want the buildings visible without a result layer set this.
+    // `ensureDesignModel` is idempotent, so this only loads the GLB the first
+    // time and never fights another page for the entity.
+    if (want.designMassing) {
+        try {
+            await ensureDesignModel();
+        } catch (error) {
+            console.warn('[Pages] Design massing failed:', error);
+        }
     }
 
     // --- Link tooltip behaviour is page-scoped ---
@@ -562,6 +697,45 @@ function applyPanelSections(page) {
         el.style.display = visible ? '' : 'none';
     });
 
+    // Order the visible sections to match `page.sections`.
+    //
+    // Visibility alone was not enough. The panel is a flat list in DOM order,
+    // and sections are shared between pages, so a section's source position
+    // decides its place on every page that uses it. That made priority
+    // inexpressible: the playback controls could not be lifted above the scope
+    // note without being lifted above it everywhere.
+    //
+    // The sections are inserted *before* the global legends block rather than
+    // appended to the panel. Appending sent them past that block, which pushed
+    // the global legends to the top of the panel -- the opposite of the intent,
+    // since they are shared furniture and belong at the bottom, under the
+    // page-specific content.
+    //
+    // Anything not named in `sections` keeps its document position, so a section
+    // omitted from the list is still visible rather than dropped.
+    const panelForOrder = document.getElementById('paramPanel');
+    if (panelForOrder && page.sections && page.sections.length) {
+        const anchor = document.getElementById('globalLegendsBlock');
+        const byId = new Map();
+        panelForOrder.querySelectorAll(':scope > .param-section').forEach((el) => {
+            const id = el.getAttribute('data-section-id');
+            if (id) byId.set(id, el);
+        });
+        // `insertBefore` moves an existing node rather than copying it. Inserting
+        // each in turn against the same anchor keeps the declared order, because
+        // every insert lands immediately before the anchor and so after the one
+        // placed before it. With no anchor present, fall back to appending.
+        page.sections.forEach((id) => {
+            const el = byId.get(id);
+            if (!el || el.style.display === 'none') return;
+            if (anchor && anchor.parentElement === panelForOrder) {
+                panelForOrder.insertBefore(el, anchor);
+            } else {
+                panelForOrder.appendChild(el);
+            }
+        });
+    }
+
     const title = document.getElementById('paramPanelTitle');
     if (title) title.textContent = page.title;
 
@@ -711,6 +885,10 @@ export async function gotoPage(pageId, options = {}) {
             await openDoc({ source: page.doc.source, title: page.doc.title || page.title });
         } else if (page.cases) {
             setCaseStudiesVisible(true);
+            buildCaseStudiesToc(
+                document.getElementById('casesToc'),
+                document.getElementById('caseStudies')
+            );
         } else if (page.tools) {
             openTools();
         }
@@ -747,9 +925,26 @@ export async function gotoPage(pageId, options = {}) {
         await openDoc({ source: page.doc.source, title: page.doc.title || page.title });
     } else if (page.cases) {
         setCaseStudiesVisible(true);
+        // The contents list is keyed to the proposal list, which can change on
+        // the Tools page, so it is rebuilt each time this page is opened rather
+        // than once at startup.
+        buildCaseStudiesToc(
+            document.getElementById('casesToc'),
+            document.getElementById('caseStudies')
+        );
     } else if (page.tools) {
         openTools();
     }
+
+    // Start the sunlight mesh download now, before anything blocks on it.
+    //
+    // `applyPageLayers` below awaits the mesh, and the loader it goes through
+    // cannot finish earlier than its failsafe timer, so the fetch is the only
+    // part of that wait that can be shortened. Kicking it off here overlaps it
+    // with the camera flight and the layer bookkeeping instead of queueing it
+    // behind them. Deliberately not awaited: it is an optimisation, and the
+    // page must open whether or not it succeeds.
+    preloadSunlightMesh().catch(() => { /* optimisation only */ });
 
     await applyPageLayers(page);
     // Layers write their ramps asynchronously (dataset load), so refresh the
@@ -802,6 +997,44 @@ export function buildNavigation(navEl) {
 }
 
 /**
+ * Wire the "why there is no holistic model" link on the multi-layer overlap
+ * page.
+ *
+ * The note in the panel is the one place a reader can be told, before they read
+ * the legends, that the overlaid layers are not coupled. Sending them to the
+ * relevant part of the documentation is the useful next step, so the link goes
+ * through `gotoPage('framework')` rather than a raw URL: the documentation page
+ * is a normal navigation page, and this keeps one path for opening it.
+ *
+ * The documentation is rendered asynchronously, so the anchor is scrolled to
+ * after the page has been opened rather than before. `docView` intercepts
+ * in-document anchor links; here the fragment is set directly, scrolling the
+ * document body to the heading once it exists.
+ */
+function initializeOverlapNoteLink() {
+    const link = document.getElementById('overlapNoteDocLink');
+    if (!link || link.dataset.wired) return;
+    link.dataset.wired = '1';
+
+    link.addEventListener('click', (event) => {
+        event.preventDefault();
+        gotoPage('framework')
+            .then(() => {
+                const target = document.getElementById('multi-layer-overlap');
+                const body = document.getElementById('docViewBody');
+                if (target && body) {
+                    const offset =
+                        target.getBoundingClientRect().top -
+                        body.getBoundingClientRect().top +
+                        body.scrollTop;
+                    body.scrollTo({ top: Math.max(0, offset - 16), behavior: 'smooth' });
+                }
+            })
+            .catch((err) => console.warn('[Overlap] Could not open documentation:', err));
+    });
+}
+
+/**
  * Initialise page navigation, restore the last page, and wire camera-touch
  * tracking so a manual camera move is remembered while the page stays open.
  */
@@ -811,6 +1044,7 @@ export async function initializePages(navEl) {
 
     initializeDocView();
     initializeToolsView();
+    initializeOverlapNoteLink();
 
     // Restore the last chosen design proposal before the first page applies its
     // layers, so the initial render already reflects the saved study.
@@ -842,6 +1076,15 @@ export async function initializePages(navEl) {
         },
     });
     if (startStudy) setActiveStudy(startStudy);
+
+    // A proposal added (or removed) on the Tools page has to appear in the
+    // contents list, so it is rebuilt when the registry changes. Guarded on the
+    // list being present: this fires for every registry change including ones
+    // made before the case-studies page has ever been opened.
+    onDataRegistryChange(() => {
+        const tocEl = document.getElementById('casesToc');
+        if (tocEl) buildCaseStudiesToc(tocEl, document.getElementById('caseStudies'));
+    });
 
     const viewer = getViewer();
     viewer.camera.moveStart.addEventListener(() => {

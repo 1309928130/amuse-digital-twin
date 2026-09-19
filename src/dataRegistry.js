@@ -109,6 +109,15 @@ export const QUALITIES = [
         consumer: 'Micro-mobility page',
         kind: 'json',
     },
+    {
+        id: 'trajectories',
+        label: 'Pedestrian trajectories',
+        file: 'agent_trajectories.json',
+        accept: '.json,application/json',
+        format: 'JSON agent paths (Kova)',
+        consumer: 'Micro-mobility page',
+        kind: 'json',
+    },
 ];
 
 /** Root for built-in data, both per-proposal and the shared legacy files. */

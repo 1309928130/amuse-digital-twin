@@ -118,26 +118,37 @@
         /* --- Rendered Markdown ---
          *
          * The measure is the interesting number here. A cap of 860px was set for
-         * a comfortable reading line, but the right panel takes a share of the
-         * width, so on a wide display it left the document using well under half
-         * the available room while feeling cramped at the same time.
+         * a comfortable reading line, but the right panel is 14vw, so on a wide
+         * display it left the document using well under half the available width
+         * while feeling cramped at the same time.
          *
-         * The cap is absolute, deliberately. Two earlier attempts tried to make
-         * it scale with the available room — first `82vw`, then `88%` — and both
-         * failed to keep this page and the Tools page in step, because neither
-         * value means the same thing on the two pages. `vw` is viewport-relative
-         * while the parents differ by a scrollbar; `%` resolves against the
-         * containing block, which is an ancestor well inside the viewport. An
-         * absolute value is the only basis both pages agree on, so the columns
-         * cannot drift.
+         * The cap is expressed in viewport units rather than pixels, because a
+         * fixed cap does not answer the complaint it was meant to. At 1100px the
+         * column is 95% of the content area on a 1280px screen (fine) but still
+         * only 67% at 1920px and 50% at 2560px — the same half-empty look, just
+         * further out.
          *
-         * 1180px is a compromise: close to the full content area on a laptop,
-         * with a bound that stops a very wide monitor stretching the text into an
-         * unreadable slab. Running text is capped separately by the
-         * per-paragraph rule below, so prose stays comfortable at this width.
+         * `vw` rather than `%` specifically so this page and the Tools page
+         * resolve to the same number. A percentage resolves against each
+         * element's own parent, and those parents differ (one is the viewport
+         * box, the other a scroller with its own padding), so `95%` produced two
+         * different widths — 716px here against 680px there. Viewport units are
+         * the same quantity on both pages.
+         *
+         * 82vw with the 14vw panel leaves a comfortable margin either side; the
+         * 1500px bound stops a very wide monitor turning the page into a
+         * full-bleed slab, and `min()` lets the bound take over past ~1830px.
          */
         .doc {
-            max-width: min(1180px, 100%);
+            /* Base width: the full pane, less a proportional gutter. This is
+               what applies below 1200px, where there is no spare width to leave
+               unused. The `@media (min-width: 1200px)` block further down
+               narrows this to the 70% share that is wanted on a laptop; keeping
+               the wide-screen value out of the base rule is what stops a phone
+               getting the desktop proportion. */
+            max-width: min(calc(100vw - var(--right-panel-width) - 8vw),
+                             1500px);
+            min-width: 0;
             margin: 0 auto;
             padding: 0 32px;
             /* `border-box` so the padding sits inside the cap, matching
@@ -156,15 +167,35 @@
             color: #1f2328;
         }
 
-        /* Cap the running text inside the wider column. Without this the
-           paragraphs would run the full column width, which on a large screen is
-           roughly 150 characters a line — around twice the length that reads
-           comfortably. This is what makes the wider column safe for prose.
-           Figures, tables and headings are deliberately not capped: they are
-           scanned rather than read line by line, and benefit from the space. */
+        /* Prose is capped at a readable line length, not at the column width.
+         *
+         * The column grows with the screen, and at 2560px it reached 2082px —
+         * about 278 characters per line, roughly three and a half times what
+         * reads comfortably, where the eye loses its place moving between
+         * lines. Uncapped is therefore not the answer either.
+         *
+         * These are the sizes each cap actually produces, measured:
+         *
+         *   1280px screen -> column 1101 -> cap 900, uses 82%
+         *   1440px screen -> column 1261 -> cap 900, uses 71%
+         *   1920px screen -> column 1571 -> cap 900, uses 57%
+         *   2560px screen -> column 2082 -> cap 900, uses 43%
+         *
+         * 900px is about 124 characters at this font size — longer than the
+         * classic 66-75 but appropriate for a technical document that is
+         * scanned rather than read as continuous prose, and it is the largest
+         * value that stays defensible. Note the honest consequence: past about
+         * 1600px the column is wider than any readable line can be, so some
+         * whitespace on a very wide monitor is unavoidable. The alternative is
+         * text nobody can read.
+         *
+         * Tables, figures and code blocks are not capped and use the full
+         * column, which is the opposite of the earlier arrangement and the
+         * point: they are scanned by column, so width helps them, while prose
+         * is read left to right, so it does not. */
         .doc p,
         .doc li {
-            max-width: 78ch;
+            max-width: 100%;
         }
         .doc h1,
         .doc h2,
@@ -216,6 +247,11 @@
             background: #f0f1f3;
             padding: 1px 5px;
             border-radius: 3px;
+            /* A long unbroken path such as
+               `visualization/simulation_data/proposal-1/` has no space to wrap
+               at, so it would otherwise push the column wider than the screen.
+               Breaking inside a word is the accepted trade for inline code. */
+            overflow-wrap: anywhere;
         }
         .doc-pre {
             background: #f6f8fa;
@@ -286,6 +322,11 @@
         .doc-table-wrap {
             overflow-x: auto;
             margin: 0 0 18px;
+            /* Keeps a wide table scrolling inside this wrapper instead of
+               widening the whole document. Without it the table sets the width
+               of `.doc`, so the page gains a horizontal scrollbar on a narrow
+               screen — the table has no business determining the column width. */
+            max-width: 100%;
         }
         .doc-table {
             border-collapse: collapse;
@@ -469,12 +510,35 @@
            ============================================================ */
         :root {
             --nav-height: 46px;
-            /* Parameter panel: ~70% of the earlier 20vw */
-            --right-panel-width: 14vw;
+            /* Parameter panel width. `max(14vw, 200px)` rather than plain 14vw
+               so this variable always equals the panel's *rendered* width: the
+               panel also has a 200px min-width clamp, and on a viewport where
+               14vw falls below it the two disagreed. Anything positioned from
+               this variable — the resize handle, the document view, the Cesium
+               inset — would then sit at the unclamped 14vw and drift away from
+               the panel's real edge. Folding the clamp in here keeps every
+               consumer on the same number without each one repeating it. */
+            --right-panel-width: max(14vw, 200px);
             /* Width the panel collapses to. Wide enough to hold the toggle
                button and read vertically as a tab, narrow enough to give the
                viewport back on a phone. */
             --right-panel-collapsed-width: 30px;
+            /* The bounds the resize drag is held within, in px. The lower bound
+               keeps the panel legible; the upper one stops it swallowing the
+               globe on a wide screen, past which the map stops being the
+               subject. Declared here (not hard-coded in the script) so the CSS
+               clamp and the drag clamp share one source of truth.
+
+               `--right-panel-width` is what the drag writes: an inline px value
+               on :root that overrides the 14vw default above. Every consumer —
+               the panel, the resize handle, the document view, the case-studies
+               picker and the Cesium inset — already reads that variable, so they
+               all follow the drag for free. The collapsed rules re-declare it
+               on <body>, which is a nearer ancestor of the panel and so still
+               wins, leaving a previously dragged width intact for when the
+               panel is expanded again. */
+            --right-panel-min-width: 200px;
+            --right-panel-max-width: min(520px, 40vw);
         }
 
         /* Collapsed state: the panel shrinks to a tab and the viewer, the
@@ -500,7 +564,14 @@
             display: flex;
             align-items: center;
             gap: 4px;
-            padding: 0 10px;
+            /* No horizontal padding, deliberately. This bar scrolls sideways, and
+               a left padding on a scroll container is a gap the sticky brand
+               cannot cover: the brand sticks at `left: 0` of the scrollport,
+               which is 10px in from the bar's edge when the padding is here, so
+               buttons sliding under it appeared through that 10px strip beside
+               the title. The breathing room is applied to the first and last
+               children instead, below, so no uncovered gutter exists. */
+            padding: 0;
             box-sizing: border-box;
             color: #fff;
             font-family: sans-serif;
@@ -508,6 +579,16 @@
             overflow-y: hidden;
             white-space: nowrap;
             scrollbar-width: none;
+        }
+        /* Keeps the first item inset from the edge and the last one off it, which
+           is what the container's padding used to do. `padding-right` on the last
+           child rather than the container, so the gap scrolls with the content
+           instead of sitting permanently over it. */
+        #topNav > :first-child {
+            margin-left: 10px;
+        }
+        #topNav > :last-child {
+            padding-right: 10px;
         }
         #topNav::-webkit-scrollbar {
             display: none;
@@ -582,13 +663,17 @@
             top: var(--nav-height);
             right: 0;
             bottom: 0;
+            /* The drag writes `--right-panel-width` as an inline px value on
+               :root, overriding the 14vw default; until then this is the
+               default. */
             width: var(--right-panel-width);
             /* The clamp is what makes the panel usable on a desktop and
-               unusable on a phone: at min-width 200px it takes over half a
-               390px-wide screen. It applies only while expanded — collapsed,
-               the panel must be free to shrink to the tab width. */
-            min-width: 200px;
-            max-width: 300px;
+               unusable on a phone: at 200px it takes over half a 390px-wide
+               screen. It applies only while expanded — collapsed, the panel
+               must be free to shrink to the tab width. The bounds live in
+               variables so the resize drag and the CSS clamp cannot disagree. */
+            min-width: var(--right-panel-min-width);
+            max-width: var(--right-panel-max-width);
             z-index: 1000;
             background: rgba(24, 24, 24, 0.88);
             backdrop-filter: blur(8px);
@@ -598,6 +683,21 @@
             box-sizing: border-box;
             overflow-y: auto;
             transition: width 0.18s ease;
+        }
+        /* During a drag the width must track the pointer exactly rather than
+           ease towards it, or the panel visibly lags the cursor and reads as
+           rubber-banding. The class is set for the duration of the drag only. */
+        body.panel-resizing #paramPanel {
+            transition: none;
+        }
+        body.panel-resizing,
+        body.panel-resizing * {
+            /* Owned by the drag, and forced on <body> so the cursor stays
+               correct even when the pointer briefly leaves the thin strip. The
+               `*` is needed because interactive children set the default
+               arrow/hand cursor, which would otherwise win over the strip. */
+            cursor: col-resize !important;
+            user-select: none !important;
         }
         body.panel-collapsed #paramPanel {
             width: var(--right-panel-collapsed-width);
@@ -611,6 +711,73 @@
            the only child left in the flow, so it reads as a pull-handle on the
            screen edge rather than a truncated panel. */
         body.panel-collapsed #paramPanel > :not(#panelToggleBtn) {
+            display: none;
+        }
+
+        /* ---- Panel resize handle ----
+           A thin grip on the panel's left edge. It is wider than it looks: the
+           visible rule is 1px, but the hit area is 7px, because a hairline is
+           almost impossible to grab with a mouse and impossible with a finger.
+           The hit area hangs off the panel's left edge, into the map, and the
+           rule is drawn on its right edge so the only line visible is the
+           panel's own edge.
+
+           It is a sibling of the panel rather than a child, and pinned to the
+           panel's edge with the same width variable. Inside the panel it would
+           have to live in a scrolling box, where `top: 0; bottom: 0` would make
+           it as tall as the content and scroll out of view with it. As a
+           sibling it is anchored to the viewport and covers exactly the strip
+           the panel occupies at any scroll position. */
+        #panelResizeHandle {
+            position: absolute;
+            top: var(--nav-height);
+            bottom: 0;
+            right: var(--right-panel-width);
+            width: 7px;
+            /* Left of the panel's own stacking context, so a drag starting on
+               the grip is never stolen by a legend or a checkbox beneath. */
+            z-index: 1001;
+            cursor: col-resize;
+            background: transparent;
+            /* Kept in the tab order so the width is reachable without a mouse;
+               the arrow keys resize it once focused. */
+            padding: 0;
+            border: 0;
+        }
+        /* The visible hairline, drawn as a child so it can light up on hover
+           without changing the hit area's geometry.
+
+           Pinned to the *right* edge of the hit area, not the left: the hit area
+           is 7px wide and hangs off the panel's left edge, so `left: 0` would
+           draw the rule 7px out into the map and read as a second, detached
+           line beside the panel. At `right: 0` the rule sits exactly on the
+           panel's own edge — the grab strip extends outward into the map, which
+           is where a resize grip belongs, and the only line the reader sees is
+           the panel's edge. */
+        #panelResizeHandle::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            right: 0;
+            width: 1px;
+            background: rgba(255, 255, 255, 0.14);
+            transition: background 0.15s ease, width 0.15s ease;
+        }
+        /* Growing the rule on hover would push it left across the panel's edge,
+           so it thickens inward: the right edge stays put and the extra pixels
+           are added to the left of it, keeping the line flush with the panel. */
+        #panelResizeHandle:hover::before,
+        #panelResizeHandle:focus-visible::before {
+            width: 3px;
+            background: #8fc7ff;
+        }
+        #panelResizeHandle:focus-visible {
+            outline: none;
+        }
+        /* No grip while collapsed: there is nothing to resize, and the whole
+           panel is the expand target, so a resizer there would fight the tap. */
+        body.panel-collapsed #panelResizeHandle {
             display: none;
         }
 
@@ -698,7 +865,6 @@
             body:not(.panel-expanded-by-user) #panelToggleBtn .panel-toggle-label {
                 display: block;
             }
-
             /* The tools viewport stops short of the panel, so on a phone it
                would be a few hundred pixels wide with the panel folded. The
                upload rows would then wrap badly, so they stack. */
@@ -736,6 +902,7 @@
             .plot-table td {
                 padding: 6px 9px;
             }
+
         }
         #paramPanel .param-scope {
             font-size: 10px;
@@ -768,6 +935,15 @@
             padding: 3px 0;
             cursor: pointer;
         }
+        /* A row that modifies the control above it rather than being a control
+           of its own. Indented, smaller, and dimmed so it reads as subordinate
+           at a glance; the indent is what carries that, since the panel has no
+           other nesting. */
+        #paramPanel .param-row-nested {
+            padding-left: 20px;
+            font-size: 11px;
+            opacity: 0.8;
+        }
         #paramPanel .param-help {
             font-size: 11px;
             line-height: 1.45;
@@ -783,6 +959,26 @@
             border-left: 3px solid #d98a00;
             background: rgba(217, 138, 0, 0.12);
             border-radius: 3px;
+        }
+        /* A result that is wrong rather than merely uncertain, so it is stated in
+           red and at full opacity instead of the muted note above. Used for the
+           oscillating-agent count: the run looks healthy and is not, and a reader
+           who misses this line will read the grey paths as routes. */
+        #paramPanel .param-warning {
+            font-size: 11px;
+            line-height: 1.45;
+            opacity: 1;
+            margin-top: 8px;
+            padding: 7px 9px;
+            border-left: 3px solid #e05252;
+            background: rgba(224, 82, 82, 0.14);
+            border-radius: 3px;
+            color: #ffd9d9;
+        }
+        /* On the document page the panel is light, so the warning text has to
+           darken with it or it vanishes into the background. */
+        #paramPanel.panel-light .param-warning {
+            color: #8a1f1f;
         }
         /* On the framework page the panel sits beside a white document rather
            than over the dark globe, so it adopts the document's light theme.
@@ -879,6 +1075,114 @@
             font-size: 11px;
             opacity: 0.9;
         }
+        /* Trajectory playback controls.
+           Sized to the panel, which is narrow on a laptop and narrower still when
+           folded on a phone, so the buttons wrap rather than overflow and the
+           sliders take the full row. */
+        .trajectory-controls {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid rgba(255, 255, 255, 0.14);
+        }
+        /* A single action that changes the view rather than a setting that
+           persists, so it is styled as a button and not as a row control. */
+        .param-action-btn {
+            display: block;
+            width: 100%;
+            margin-top: 10px;
+            padding: 7px 10px;
+            font-size: 11.5px;
+            font-weight: 600;
+            font-family: inherit;
+            color: #e6edf3;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.22);
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .param-action-btn:hover {
+            background: rgba(255, 255, 255, 0.16);
+        }
+        .param-action-btn:active {
+            background: rgba(255, 255, 255, 0.24);
+        }
+        .param-action-btn:focus-visible {
+            outline: 2px solid #8fc7ff;
+            outline-offset: 1px;
+        }
+        #paramPanel.panel-light .param-action-btn {
+            color: #1f2328;
+            background: rgba(0, 0, 0, 0.05);
+            border-color: rgba(0, 0, 0, 0.18);
+        }
+        /* Sits under a control as its caption, so it is tighter than the
+           standalone help text it follows. */
+        .param-help-tight {
+            margin-top: 5px;
+            opacity: 0.82;
+        }
+        .trajectory-buttons {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-bottom: 8px;
+        }
+        .trajectory-btn {
+            flex: 1 1 auto;
+            padding: 5px 8px;
+            font-size: 11px;
+            font-weight: 600;
+            color: #e6edf3;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.22);
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .trajectory-btn:hover {
+            background: rgba(255, 255, 255, 0.16);
+        }
+        .trajectory-btn:active {
+            background: rgba(255, 255, 255, 0.24);
+        }
+        .trajectory-btn:focus-visible {
+            outline: 2px solid #8fc7ff;
+            outline-offset: 1px;
+        }
+        .trajectory-field {
+            display: grid;
+            grid-template-columns: auto 1fr auto;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            margin-bottom: 6px;
+            opacity: 0.92;
+        }
+        .trajectory-field input[type="range"] {
+            width: 100%;
+            min-width: 0;
+            accent-color: #8fc7ff;
+        }
+        .trajectory-field output {
+            font-variant-numeric: tabular-nums;
+            min-width: 3.4em;
+            text-align: right;
+        }
+        /* Hidden until there is a run to control. Both states are declared so
+           nothing shifts when the layer loads. */
+        .trajectory-controls[hidden] {
+            display: none;
+        }
+        #paramPanel.panel-light .trajectory-controls {
+            border-top-color: rgba(0, 0, 0, 0.12);
+        }
+        #paramPanel.panel-light .trajectory-btn {
+            color: #1f2328;
+            background: rgba(0, 0, 0, 0.05);
+            border-color: rgba(0, 0, 0, 0.18);
+        }
+        #paramPanel.panel-light .trajectory-btn:hover {
+            background: rgba(0, 0, 0, 0.1);
+        }
         #paramPanel a {
             color: #8fc7ff;
         }
@@ -937,6 +1241,40 @@
         }
         #paramPanel .param-toc-dark .toc-empty {
             color: #767c84;
+        }
+
+        /* "no data" marker on a case-studies contents entry. Quiet by default so
+           it qualifies the label without competing with it: every entry with no
+           results carries one, and a column of loud badges would read as an
+           alarm rather than as information. */
+        .toc-flag {
+            margin-left: 6px;
+            font-size: 10px;
+            font-weight: 400;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+            opacity: 0.55;
+            white-space: nowrap;
+        }
+
+        /* The proposal names in this list must match the "Active study" name
+           above them, because they name the same things in the same panel.
+
+           They did not: the list inherited 16px from the panel's base text while
+           the active name is 13px/600, so the contents read as a heavier, larger
+           tier than the label it sits under — which is backwards, since it is the
+           secondary of the two. Declared here at the same 13px/600 as
+           `.case-active-name`, on the dark panel only, because that is where this
+           list is used; the document and tools contents keep their own sizing. */
+        #paramPanel .param-toc-dark .toc-link {
+            font-size: 13px;
+            font-weight: 600;
+        }
+        /* An entry for a proposal with no results is de-emphasised, so the eye
+           lands first on the ones that have something behind them. Matches the
+           active name's own subdued treatment rather than inventing a second. */
+        #paramPanel .param-toc-dark .toc-link .toc-flag {
+            font-weight: 400;
         }
 
         /* ---- Global legends: collapsible accordion at the panel bottom ---- */
@@ -1130,7 +1468,37 @@
             font-size: 12.5px;
             line-height: 1.5;
             color: #a9b0ba;
-            max-width: 760px;
+        }
+
+        /* Layout switch: a quiet text control, not a call to action. It is a
+           temporary comparison aid, so it should be findable but not compete
+           with the proposals themselves. */
+        .cases-layout-switch {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            margin-top: 3px;
+            font-size: 11.5px;
+            color: #7f858d;
+        }
+        .cases-layout-switch button {
+            padding: 2px 9px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+            background: transparent;
+            color: #a9b0ba;
+            font: inherit;
+            cursor: pointer;
+        }
+        .cases-layout-switch button:hover {
+            border-color: rgba(143, 199, 255, 0.6);
+            color: #e8eaed;
+        }
+        .cases-layout-switch button[aria-pressed='true'] {
+            border-color: #8fc7ff;
+            background: rgba(143, 199, 255, 0.14);
+            color: #cfe7ff;
+            font-weight: 600;
         }
 
         .cases-grid {
@@ -1200,6 +1568,25 @@
         .case-badge.is-empty {
             background: rgba(255, 255, 255, 0.16);
             color: #cfd4db;
+        }
+
+        /* The badge overlaid on a card's thumbnail becomes an inline chip beside
+           the proposal name in a row.
+         *
+           `position: absolute` above is written for the card, where the badge
+           sits on top of the picture. Moving it into `.cases-row-name` without
+           this override left it absolutely positioned with `top: 8px; left: 8px`
+           relative to the nearest positioned ancestor — so it flew out of the
+           name line and landed in the top-left corner of the row, over the
+           header rather than next to the label it belongs to. */
+        .cases-row-name .case-badge {
+            position: static;
+            flex: 0 0 auto;
+            padding: 2px 6px;
+            /* Slightly smaller than the card's overlay, because here it is read
+               at the same time as the name beside it rather than glanced at over
+               an image. */
+            font-size: 9px;
         }
 
         .case-meta {
@@ -1289,6 +1676,141 @@
                grids on one rhythm rather than two slightly different ones. */
             grid-template-columns: repeat(4, minmax(0, 1fr));
             gap: 14px;
+        }
+
+        /* ------------------------------------------------------------------
+           Row layout (`.cases-rows` on #caseStudies)
+
+           The alternative to the card grid: one band per proposal, so every
+           proposal and its snapshots read as a single unit and can be compared
+           by scrolling rather than by clicking between selections.
+
+           Kept alongside the grid rather than replacing it, so the two can be
+           compared before one is chosen. The grid's own rules above are
+           untouched and still apply when this class is absent.
+           ------------------------------------------------------------------ */
+
+        /* The row list replaces the grid entirely, so the grid steps aside. */
+        #caseStudies.cases-rows .cases-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+        }
+
+        /* And the drill-down has nothing to do: each band carries its own
+           snapshots, so a separate section repeating one of them would show the
+           same grid twice. */
+        #caseStudies.cases-rows .cases-drill {
+            display: none;
+        }
+
+        /* One band: header row, then the snapshots belonging to it. */
+        .cases-row {
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            border-radius: 8px;
+            background: #1a1d22;
+            overflow: hidden;
+        }
+
+        /* The proposal header is itself the select button, so the whole row
+           header is the target rather than a small card inside it. */
+        .cases-row-head {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            width: 100%;
+            padding: 12px 14px;
+            border: 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            background: #1c1f24;
+            color: inherit;
+            font: inherit;
+            text-align: left;
+            cursor: pointer;
+            transition: background 0.16s ease;
+        }
+        .cases-row-head:hover {
+            background: #22262c;
+        }
+        .cases-row-head:focus-visible {
+            outline: 2px solid #8fc7ff;
+            outline-offset: -2px;
+        }
+        /* Selected state reads as a left bar plus a tinted header, which is
+           legible at row width where a border and shadow would be lost. */
+        .cases-row.is-active .cases-row-head {
+            background: #1f2733;
+        }
+        .cases-row.is-active {
+            border-color: #8fc7ff;
+            box-shadow: 0 0 0 1px rgba(143, 199, 255, 0.55);
+        }
+
+        /* Small fixed thumbnail: the row's job is to name the proposal and show
+           its results, so the artwork is a marker rather than the content. */
+        .cases-row-thumb {
+            flex: 0 0 auto;
+            width: 116px;
+            aspect-ratio: 16 / 10;
+            border-radius: 5px;
+            background: #0f1114;
+            overflow: hidden;
+            position: relative;
+        }
+        .cases-row-thumb img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+        /* No image uploaded: a dashed placeholder, matching the empty-card
+           treatment, so a missing picture reads as "not provided" rather than
+           as a rendering fault. */
+        .cases-row-thumb.is-missing {
+            border: 1px dashed rgba(255, 255, 255, 0.18);
+            background: repeating-linear-gradient(
+                45deg,
+                rgba(255, 255, 255, 0.03) 0 6px,
+                transparent 6px 12px
+            );
+        }
+
+        .cases-row-meta {
+            flex: 1 1 auto;
+            min-width: 0;
+            /* Bounded so the name and note do not stretch across the full width
+               of a 1600px row. Worked out the same way as the document pages'
+               prose: a row is scanned by eye, and a line running the full width
+               is harder to follow than one at a comfortable measure. The
+               remainder of the row is left empty rather than filled with text
+               for its own sake. */
+            max-width: 760px;
+        }
+        .cases-row-name {
+            display: flex;
+            align-items: center;
+            gap: 9px;
+            font-size: 15px;
+            font-weight: 600;
+            letter-spacing: 0.2px;
+            /* Lets the name ellipsise rather than push the badge out of the row
+               on a narrow screen. */
+            min-width: 0;
+        }
+        .cases-row-note {
+            margin-top: 3px;
+            font-size: 12px;
+            line-height: 1.45;
+            color: #a9b0ba;
+        }
+
+        /* The snapshots inside a band. Same four-up rhythm as the drill-down,
+           so a quality card looks the same in either layout. */
+        .cases-row-pages {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 12px;
+            padding: 14px;
         }
 
         .page-card {
@@ -1409,19 +1931,14 @@
         #toolsView[hidden] {
             display: none;
         }
+
         .tools-inner {
             padding: 26px 30px 34px;
-            /* The same absolute cap as `.doc`. Absolute, not relative, because
-               `vw` and `%` each resolve differently on the two pages and let the
-               columns drift apart; a plain pixel value is the one basis they
-               share. Change this and the `.doc` value together if the column
-               should ever be re-sized — they are a pair. */
-            max-width: min(1180px, 100%);
+            max-width: min(calc(100vw - var(--right-panel-width) - 8vw),
+                             1500px);
             /* `width: 100%` is load-bearing, not decoration. Without it this
                element shrink-to-fits its content, so on a narrow screen it grew
-               to 438px inside a 360px scroller and the page scrolled sideways.
-               The `max-width` above bounds it on a wide screen; this makes it
-               fill its parent on a narrow one. */
+               to 438px inside a 360px scroller and the page scrolled sideways. */
             width: 100%;
             box-sizing: border-box;
             /* The centring. Without this the column sat flush left while the
@@ -1429,14 +1946,40 @@
                like a layout change rather than a page change. */
             margin: 0 auto;
         }
+
+        /* At laptop-and-up widths the boxes are held to about 70% of the space
+           left of the right panel, which is the proportion asked for at that
+           size.
+         *
+           It cannot be the value at every size. On a 390px phone the same
+           proportion left a 259px column with 159px of prose and a large empty
+           margin — a share that reads as generous on a desktop just removes
+           usable width on a small screen. Below the breakpoint the column fills
+           the pane, and the proportion applies only where there is width to
+           spare.
+         *
+           Both selectors are listed, because the two document-style pages must
+           agree; a duplicated factor on `.doc` alone is how they drifted apart
+           before. */
+        @media (min-width: 1200px) {
+            .doc,
+            .tools-inner {
+                max-width: min(calc((100vw - var(--right-panel-width)) * 0.72),
+                                 1500px);
+            }
+        }
         .tools-head h2 {
             margin: 0 0 8px;
             font-size: 21px;
             font-weight: 600;
         }
         .tools-head p {
+            max-width: 100%;
             margin: 0 0 24px;
-            max-width: 62ch;
+            /* Full column width, matching the Documentation page. A cap was
+               tried here and removed: on a wide screen it left the text narrower
+               than the blocks beneath it, which read as two misaligned
+               columns. */
             font-size: 13px;
             line-height: 1.55;
             color: #a9b0b8;
@@ -1493,9 +2036,10 @@
             color: #b8bec6;
         }
         .tools-note {
+            max-width: 100%;
             margin: 22px 0 0;
             padding: 11px 13px;
-            max-width: 62ch;
+            /* Full column width, like the other prose on this page. */
             border-left: 3px solid #d98a00;
             border-radius: 3px;
             background: rgba(217, 138, 0, 0.1);
@@ -1540,8 +2084,9 @@
             line-height: 1.3;
         }
         .tools-block-lede {
+            max-width: 100%;
             margin: 0 0 16px;
-            max-width: 62ch;
+            /* Kept in step with `.tools-head p` and `.tools-note`. */
             font-size: 12.5px;
             line-height: 1.55;
             color: #a9b0b8;
@@ -1561,6 +2106,7 @@
             color: #a9b0b8;
         }
         .tools-ledger-line {
+            max-width: 100%;
             margin: 0;
         }
 
@@ -1835,13 +2381,14 @@
             font-weight: 600;
         }
         .partner-feed-summary {
+            max-width: 100%;
             margin: 0 0 6px;
             font-size: 12px;
             color: #cfd4db;
         }
         .partner-feed-detail {
+            max-width: 100%;
             margin: 0;
-            max-width: 72ch;
             font-size: 11.5px;
             line-height: 1.55;
             color: #8f959d;
@@ -1858,8 +2405,8 @@
             font-weight: 600;
         }
         .partner-panel-lede {
+            max-width: 100%;
             margin: 0 0 14px;
-            max-width: 70ch;
             font-size: 12px;
             line-height: 1.55;
             color: #a9b0b8;
@@ -1898,9 +2445,9 @@
         }
 
         .partner-promises {
+            max-width: 100%;
             margin: 14px 0 16px;
             padding-left: 18px;
-            max-width: 74ch;
         }
         .partner-promises li {
             margin-bottom: 6px;
@@ -1918,10 +2465,10 @@
         /* The test outcome. Coloured by state so the result is legible before the
            sentence is read, which matters when the sentence is long. */
         .partner-result {
+            max-width: 100%;
             margin: 14px 0 0;
             padding: 10px 12px;
             border-radius: 5px;
-            max-width: 74ch;
             font-size: 11.5px;
             line-height: 1.55;
             border-left: 3px solid transparent;
@@ -2034,8 +2581,8 @@
             font-weight: 600;
         }
         .plot-panel-note {
+            max-width: 100%;
             margin: 0 0 6px;
-            max-width: 68ch;
             font-size: 12px;
             line-height: 1.55;
             color: #a9b0b8;
@@ -2199,8 +2746,8 @@
             padding: 4px 0;
         }
         .tools-builtin-lede {
+            max-width: 100%;
             margin: 0 0 12px;
-            max-width: 70ch;
             font-size: 12px;
             line-height: 1.55;
             color: #a9b0b8;
@@ -2242,6 +2789,7 @@
             color: #7d848c;
         }
         .tools-builtin-note {
+            max-width: 100%;
             margin: 14px 0 0;
             font-size: 11.5px;
             color: #8f959d;
@@ -2277,8 +2825,8 @@
             text-transform: uppercase;
         }
         .tools-image-caption {
+            max-width: 100%;
             margin: 0 0 12px;
-            max-width: 72ch;
             font-size: 11.5px;
             line-height: 1.55;
             color: #8f959d;
@@ -2414,6 +2962,47 @@
             margin-top: 9px;
         }
 
+
+        /* Case studies on a narrow screen.
+
+           Placed at the end of the sheet, after every base rule, and
+           that position is load-bearing: `.cases-row-pages` and
+           `#caseStudies` are declared later in the sheet, so a phone
+           override inside the 720px block above lost to them on cascade
+           order — equal specificity, later declaration wins — and the
+           snapshots stayed four-up at 61px wide. Kept in its own query
+           for the same reason. */
+        @media (max-width: 720px) {
+            /* ---- Case studies ----
+               The quality snapshots are the point of this page, so they have to
+               stay legible rather than being crushed into four columns on a
+               phone. Two-up at this width gives each card roughly half the row,
+               which is the smallest a snapshot can be and still be recognised;
+               the 3-up proposal grid follows for the same reason. */
+            .cases-grid,
+            .cases-pages,
+            .cases-row-pages {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+            /* The row header stacks its thumbnail above the name, because at
+               this width a 116px thumbnail beside the text leaves a few
+               characters per line. */
+            .cases-row-head {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 9px;
+            }
+            .cases-row-thumb {
+                width: 100%;
+                max-width: 190px;
+            }
+            .cases-row-meta {
+                max-width: 100%;
+            }
+            #caseStudies {
+                padding: 18px 16px 22px;
+            }
+        }
     </style>
 </head>
 <body>
@@ -2457,12 +3046,41 @@
         -->
         <div id="caseStudyState" hidden></div>
 
+        <!--
+            Layout switch. The case-studies page has two arrangements of the same
+            content, and this class on the section chooses between them:
+
+              (none)          the original three-column card grid, with the
+                              selected proposal's quality pages in a separate
+                              drill-down below
+              .cases-rows     one full-width band per proposal: a header row
+                              naming it, its quality snapshots in a grid beneath
+
+            Both are kept deliberately. The grid is the long-standing layout and
+            the row view is the alternative; keeping the class rather than
+            replacing the markup means the original is still one line away, and
+            whichever is kept can be deleted once the comparison is settled.
+        -->
         <div class="cases-head">
             <h2>Design proposals</h2>
             <p>
                 Three proposals are assessed on the same street-level grid. Pick one to make it
                 the active study for every assessment page above.
             </p>
+            <!--
+                Layout switch, for comparing the two arrangements. Temporary: it
+                exists so the row view and the original grid can be seen one after
+                the other before one is chosen. Styled as a quiet text control
+                rather than a button so it does not read as part of the page.
+
+                The starting layout follows the screen — cards on a laptop, rows
+                on a phone — and clicking here overrides that for the session.
+            -->
+            <div class="cases-layout-switch">
+                <span>Layout:</span>
+                <button type="button" id="casesLayoutRows">Rows</button>
+                <button type="button" id="casesLayoutGrid">Cards</button>
+            </div>
         </div>
 
         <div class="cases-grid" id="casesGrid" role="group" aria-label="Select a design proposal"></div>
@@ -2471,6 +3089,9 @@
             Drill-down: revealed once a proposal is chosen. The quality pages
             are shown as snapshot cards so the way in is obvious, rather than
             leaving a selected proposal with nothing to do next.
+
+            Hidden entirely in the row layout, where every proposal carries its
+            own snapshots and there is nothing left to drill into.
         -->
         <div class="cases-drill" id="casesDrill" hidden>
             <div class="cases-drill-head">
@@ -2522,6 +3143,18 @@
                 <span>Pedestrian demand</span>
             </label>
             <label class="param-row">
+                <input type="checkbox" id="trajectoriesSwitch">
+                <span>Agent trajectories (Kova)</span>
+            </label>
+            <!-- Nested under the layer it modifies, and indented, so it reads as
+                 a property of the trajectory layer rather than a layer of its
+                 own. Off by default: Kova re-plans every iteration, so the full
+                 run traces a grid over the street that hides the agents. -->
+            <label class="param-row param-row-nested">
+                <input type="checkbox" id="trajectoryPathsSwitch">
+                <span>Route lines</span>
+            </label>
+            <label class="param-row">
                 <input type="checkbox" id="urbanHeatSwitch">
                 <span>Urban heat field</span>
             </label>
@@ -2539,6 +3172,31 @@
             </label>
         </div>
 
+        <!--
+            Section: overlap independence note (multi-layer overlap page).
+
+            The one thing a reader can get wrong on this page is assuming the
+            layers were produced by a single coupled model and therefore agree
+            by construction. They were not: each quality is a separate
+            assessment with its own inputs, scale and resolution, and the page
+            simply draws them on top of one another. The note says so before the
+            legends are read, and links through to the documentation section
+            that explains why a holistic model is not available.
+        -->
+        <div class="param-section" data-section-id="overlap-note">
+            <div class="param-section-title">Reading this overlay</div>
+            <div class="param-help param-provisional">
+                <b>These layers are independent.</b> Each quality is a separate
+                assessment with its own inputs, assumptions, spatial scale and
+                resolution — they are not coupled, and they do not share a common
+                calibration. Overlapping them lets you compare where qualities
+                balance or conflict across the area, but agreement between two
+                layers is a prompt to look closer, not a confirmation.
+                <br><br>
+                <a href="#" id="overlapNoteDocLink">Why there is no holistic model &rarr;</a>
+            </div>
+        </div>
+
         <!-- Section: flow scope -->
         <div class="param-section" data-section-id="flow-scope">
             <div class="param-section-title">Assessment scope</div>
@@ -2552,7 +3210,7 @@
         <div class="param-section" data-section-id="micro-scope">
             <div class="param-section-title">Assessment scope</div>
             <div class="param-help">
-                Station square in front of Amsterdam Zuid, ~350 m across.
+                Simulated street, ~240 m east-west by ~295 m north-south.
                 Click a link to pin its values.
             </div>
         </div>
@@ -2573,6 +3231,109 @@
                  style="background: linear-gradient(to right, #0000ff, #00ffff, #00ff00, #ffff00, #ff0000);"></div>
             <div class="legend-scale"><span>0</span><span id="panelledDemandMax">…</span></div>
             <div class="param-help">trip generation, trips / day (P95 cap)</div>
+        </div>
+
+        <!-- Section: Kova agent trajectories legend -->
+        <!-- Deliberately describes the Kova run rather than a magnitude ramp: the
+             colours identify individual agents, so there is no scale to show. The
+             units line is the important part — speeds are nominal metres per
+             second and saying so is what keeps the read-out honest. -->
+        <div class="param-section" data-section-id="legend-trajectories">
+            <div class="param-section-title">Agent trajectories</div>
+            <div class="legend-bar"
+                 style="background: linear-gradient(to right, #ffd666, #ff8a65, #81d4fa, #aed581, #ce93d8, #f06292, #80deea, #ffb74d);"></div>
+            <div class="legend-scale"><span>one colour per agent</span><span id="trajectoryAgentCount">…</span></div>
+            <div class="param-help">Kova 1.2.0 cellular automata, agent positions per iteration</div>
+            <div class="param-help" id="trajectoryUnits">speeds: metres per iteration</div>
+            <!-- The paths are drawn smoothed. Saying so is the point: the export
+                 is a lattice trace in which agents reverse on roughly half their
+                 steps, and a viewer comparing this scene against the raw file
+                 would otherwise find two different pictures and no explanation.
+                 The numbers are the measured effect on this run, so the note can
+                 be checked rather than taken on trust. -->
+            <div class="param-help" id="trajectorySmoothingNote">
+                paths smoothed for readability (3-point moving average):
+                the raw trace turns a median 90&deg; per step and walks 9.3&times; the
+                ground it advances, which reads as figures vibrating in place.
+                Smoothing gives 27&deg; and 5.0&times;, with start and end points
+                unchanged. The exported file keeps the unsmoothed simulation output.
+            </div>
+            <!-- Which figure is drawn. Hidden on pages that use dots, and on
+                 any proposal with no Kova run. -->
+            <div class="param-help" id="trajectoryFigure" style="display:none;">figures: loading…</div>
+            <!-- No attribution line here. The walking figures are Quaternius'
+                 Universal Animation Library, released CC0, which carries no
+                 credit requirement -- so unlike the CC-BY pack this replaced,
+                 the credit is not a licence obligation and does not need to
+                 travel with the deployment. Attributing CC0 work is welcome but
+                 optional, and the pack name belonged to a model no longer in
+                 use, which made the line an inaccuracy in the panel.
+                 The provenance stays recorded in `agentAvatar.js`, where it is
+                 useful to whoever maintains the asset, and in the framework
+                 document, which is the written account of the methods. -->
+            <!-- Agents that oscillate instead of walking. Without this line the
+                 run reads as healthy: an oscillating agent takes normal-sized
+                 steps and so reports a normal speed, and only path length against
+                 net displacement reveals that it covered no ground. Grey paths on
+                 the map are the ones this counts. -->
+            <div class="param-warning" id="trajectoryOscillating" style="display:none;"></div>
+        </div>
+
+        <!-- Section: playback transport.
+             Lifted out of the trajectories legend and placed directly under the
+             layer switches, because these are the controls a viewer reaches for
+             first. Nested in the legend they sat below a colour key and an
+             attribution line, which is where they were found only after
+             scrolling past material that is read once rather than used.
+
+             The scrubber is labelled in iterations, not seconds, because that is
+             the only clock Kova has: a time axis here would imply a real
+             duration that does not exist. -->
+        <div class="param-section" data-section-id="transport">
+            <div class="param-section-title">Playback</div>
+            <div class="trajectory-controls" id="trajectoryControls">
+                <div class="trajectory-buttons">
+                    <!-- One transport button. Play and Pause were separate and
+                         exclusive, so exactly one of them was always a no-op --
+                         at rest half the available clicks did nothing, and a
+                         viewer had to read two labels to know the current state.
+                         A single button that toggles, and whose label states the
+                         action it will take, has no dead state. -->
+                    <button type="button" id="trajectoryToggle" class="trajectory-btn pause" aria-pressed="false">▶ Play</button>
+                    <button type="button" id="trajectoryReset" class="trajectory-btn">Reset</button>
+                </div>
+                <label class="trajectory-field">
+                    <span>Iteration</span>
+                    <input type="range" id="trajectoryScrub" min="0" max="100" value="0" step="1">
+                    <output id="trajectoryScrubValue">0</output>
+                </label>
+                <label class="trajectory-field">
+                    <span>Speed</span>
+                    <!-- A multiple of real time, not a physical speed. The
+                         pedestrians' speed is fixed in the exported data, so a
+                         viewer changing this is changing how fast they watch,
+                         not how fast anyone walked. The control was previously
+                         labelled in metres per second, which read as a property
+                         of the simulation when it described the playback.
+
+                         x1.0 replays the run at its own median walking pace,
+                         which the export calibrates to 1.2 m/s. The range is
+                         capped at x2 rather than x8 because the use is watching a
+                         street, and past roughly x2 the walk cycle reaches its
+                         clamp and the figures start sliding rather than walking --
+                         faster settings looked broken, not faster.
+
+                         The step is 0.01, not 0.1, so the low end stays
+                         reachable. Over a 0.1-2.0 range a 0.1 step gives only
+                         nineteen positions in total, and the slow settings people
+                         actually want -- x0.1 to x0.4 -- collapsed into three of
+                         them, a few pixels of travel each. A hundredth of a
+                         multiple is finer than the eye can judge and makes every
+                         part of the range addressable. -->
+                    <input type="range" id="trajectorySpeed" min="0.1" max="2" value="0.6" step="0.01">
+                    <output id="trajectorySpeedValue">x0.60</output>
+                </label>
+            </div>
         </div>
 
         <!-- Section: heat legend -->
@@ -2689,6 +3450,18 @@
                 Only Proposal 1 has results so far; the other two are placeholders until their
                 assessments are run.
             </div>
+        </div>
+
+        <!--
+            Contents for the case-studies page. One entry per proposal, pointing
+            at that proposal's band, so the panel can jump between studies the
+            way the documentation page's contents jumps between sections. Filled
+            by buildCaseStudiesToc, which rebuilds it whenever a proposal is
+            added on the Tools page.
+        -->
+        <div class="param-section" data-section-id="cases-toc">
+            <div class="param-section-title">Proposals</div>
+            <nav id="casesToc" class="param-toc-dark" aria-label="Proposal contents"></nav>
         </div>
 
         <!-- Section: framework info -->
@@ -2949,6 +3722,20 @@
         </div><!-- /#globalLegendsBlock -->
     </aside>
 
+    <!--
+        Drag grip for the right parameter panel.
+
+        Deliberately a sibling of the panel rather than a child: the panel is a
+        scroll container, so a child pinned to `top: 0; bottom: 0` would stretch
+        to the content height and scroll away with it. Anchored here, it tracks
+        the panel's visible edge at any scroll position. `role="separator"` plus
+        `aria-orientation` is the standard way to expose a resizer to assistive
+        tech, and `tabindex` makes it reachable by keyboard (arrow keys resize).
+    -->
+    <div id="panelResizeHandle" role="separator" aria-orientation="vertical"
+         aria-label="Resize the parameter panel" aria-controls="paramPanel"
+         tabindex="0" title="Drag to resize the panel"></div>
+
     <!-- SUMO Custom Time Slider -->
     <div id="sumoTimeSlider">
         <div class="slider-header">
@@ -3057,37 +3844,29 @@
         function makeDraggable(panelId) {
             const panel = document.getElementById(panelId);
             if (!panel) return;
-
             const header = panel.querySelector('.panel-header');
             if (!header) return;
-
             if (panel.hasAttribute('data-drag-initialized')) {
                 return;
             }
             panel.setAttribute('data-drag-initialized', 'true');
-
             header.addEventListener('pointerdown', (e) => {
                 if (e.button !== undefined && e.button !== 0) return;
                 if (e.target.closest('.panel-minimize-btn')) return;
-
                 pinPanelToTopLeft(panel);
                 draggedElement = panel;
                 activePointerId = e.pointerId;
                 dragOffset.x = e.clientX - panel.getBoundingClientRect().left;
                 dragOffset.y = e.clientY - panel.getBoundingClientRect().top;
-
                 panel.classList.add('dragging');
                 panel.style.zIndex = 10000;
                 try { header.setPointerCapture(e.pointerId); } catch (_) { /* ignore */ }
-
                 e.preventDefault();
                 e.stopPropagation();
             });
-
             header.addEventListener('pointermove', (e) => {
                 if (!draggedElement || draggedElement !== panel) return;
                 if (activePointerId !== null && e.pointerId !== activePointerId) return;
-
                 const x = e.clientX - dragOffset.x;
                 const y = e.clientY - dragOffset.y;
                 const maxX = window.innerWidth - panel.offsetWidth;
@@ -3099,7 +3878,6 @@
                 e.preventDefault();
                 e.stopPropagation();
             });
-
             const stop = (e) => {
                 if (activePointerId !== null && e.pointerId !== activePointerId) return;
                 if (draggedElement === panel) endPanelDrag();
@@ -3115,15 +3893,11 @@
         function togglePanel(panelId) {
             const panel = document.getElementById(panelId);
             if (!panel) return;
-
             const content = panel.querySelector('.panel-content');
             const btn = panel.querySelector('.panel-minimize-btn');
-
             if (!content || !btn) return;
-
             const isMinimized = panelStates[panelId] || false;
             panelStates[panelId] = !isMinimized;
-
             if (panelStates[panelId]) {
                 content.classList.add('minimized');
                 btn.textContent = '+';
@@ -3263,23 +4037,19 @@
             const btn = document.getElementById('panelToggleBtn');
             const panel = document.getElementById('paramPanel');
             if (!btn || !panel) return;
-
             btn.addEventListener('click', (e) => {
                 // The panel itself is also clickable while collapsed, so stop the
                 // button's own click from being handled twice on the way up.
                 e.stopPropagation();
                 setPanelCollapsed(!isPanelCollapsed());
             });
-
             // While collapsed the whole panel is the handle, which is a much
             // bigger target than the arrow on a touch screen.
             panel.addEventListener('click', () => {
                 if (isPanelCollapsed()) setPanelCollapsed(false);
             });
-
             restorePanelCollapse();
             syncPanelToggle();
-
             // Crossing the breakpoint (rotating a phone, resizing a window)
             // should pick up the new default, unless the user has chosen.
             try {
@@ -3295,16 +4065,173 @@
         window.initializePanelCollapse = initializePanelCollapse;
         window.setPanelCollapsed = setPanelCollapsed;
 
+        // ---- Drag the right parameter panel wider or narrower ----
+        // The default width is a viewport fraction (14vw), which suits the
+        // legend-heavy assessment pages but is cramped on the documentation and
+        // tools pages, where the panel carries a contents list and a title. The
+        // drag lets the reader spend more of the screen on whichever side of the
+        // trade-off they are reading for.
+        //
+        // The width is written into `--right-panel-user-width` on :root, which
+        // `#paramPanel` and the resize handle both read. Nothing else has to be
+        // told: the document view, the case-studies picker and the Cesium inset
+        // are all sized from the same variable, so the globe reflows with the
+        // panel and the layout has a single source of truth.
+        const PANEL_WIDTH_KEY = 'pedmodel.panelWidth';
+
+        /** The px bounds the drag is held within, read from CSS. */
+        function panelWidthBounds() {
+            const cs = getComputedStyle(document.documentElement);
+            const parse = (name, fallback) => {
+                const v = parseFloat(cs.getPropertyValue(name));
+                return Number.isFinite(v) ? v : fallback;
+            };
+            // The max is declared as `min(520px, 40vw)`, and
+            // `getPropertyValue` returns that text rather than a number, so the
+            // viewport share is recomputed here. Reading it from CSS and
+            // resolving it in JS is what keeps the two in step.
+            const min = parse('--right-panel-min-width', 200);
+            const rawMax = cs.getPropertyValue('--right-panel-max-width').trim();
+            let max = window.innerWidth * 0.4;
+            const pxMatch = rawMax.match(/(\d+(?:\.\d+)?)px/);
+            if (pxMatch) max = Math.min(max, parseFloat(pxMatch[1]));
+            // Never let the bounds cross, or the drag would be stuck.
+            if (max < min) max = min;
+            return { min, max };
+        }
+
+        /** Clamp a candidate width to the CSS bounds and the current viewport. */
+        function clampPanelWidth(px) {
+            const { min, max } = panelWidthBounds();
+            return Math.max(min, Math.min(max, px));
+        }
+
+        /** Write a width to the panel and remember it for the session. */
+        function applyPanelWidth(px, { remember = true } = {}) {
+            const width = clampPanelWidth(px);
+            // Inline on :root, so it overrides the 14vw default in the
+            // stylesheet. Writing the *same* variable every other layout already
+            // reads is what makes the globe, the document view and the picker
+            // reflow with the drag without being told individually.
+            document.documentElement.style.setProperty('--right-panel-width', `${width}px`);
+            if (remember) {
+                try {
+                    sessionStorage.setItem(PANEL_WIDTH_KEY, String(Math.round(width)));
+                } catch (_) { /* ignore */ }
+            }
+            return width;
+        }
+
+        /** Restore a dragged width, if the reader ever set one. */
+        function restorePanelWidth() {
+            let saved = null;
+            try {
+                const raw = sessionStorage.getItem(PANEL_WIDTH_KEY);
+                if (raw !== null && Number.isFinite(parseFloat(raw))) saved = parseFloat(raw);
+            } catch (_) { /* ignore */ }
+            if (saved === null) return;
+            applyPanelWidth(saved, { remember: false });
+        }
+
+        function initializePanelResize() {
+            const handle = document.getElementById('panelResizeHandle');
+            const panel = document.getElementById('paramPanel');
+            if (!handle || !panel) return;
+
+            restorePanelWidth();
+
+            // Pointer capture, rather than listeners on the document: the
+            // pointer routinely leaves the 7px strip during a fast drag, and
+            // capture keeps the move events coming to the handle regardless.
+            // It also means the drag ends cleanly on pointerup/cancel without a
+            // document-level listener that could outlive the gesture.
+            let dragging = false;
+            let pointerId = null;
+
+            const onPointerMove = (event) => {
+                if (!dragging || event.pointerId !== pointerId) return;
+                // The panel is flush with the right edge, so its width is the
+                // distance from the pointer to that edge.
+                applyPanelWidth(window.innerWidth - event.clientX);
+            };
+
+            const endDrag = (event) => {
+                if (!dragging || (event && event.pointerId !== pointerId)) return;
+                dragging = false;
+                document.body.classList.remove('panel-resizing');
+                try {
+                    if (pointerId !== null) handle.releasePointerCapture(pointerId);
+                } catch (_) { /* already released */ }
+                pointerId = null;
+                // Cesium sizes its canvas to the container, which just changed.
+                // It watches window resizes, not its own box, so without this
+                // the globe keeps the old drawing surface and the edge is
+                // clipped — the same reason the collapse toggle does it.
+                try { window.dispatchEvent(new Event('resize')); } catch (_) { /* ignore */ }
+            };
+
+            handle.addEventListener('pointerdown', (event) => {
+                // Primary button only: a right or middle click should not start
+                // a resize, and on a touch screen there is only one button.
+                if (event.button !== 0) return;
+                // While collapsed there is nothing to resize; the CSS already
+                // hides the handle, but a stray event would still land here.
+                if (isPanelCollapsed()) return;
+                event.preventDefault();
+                dragging = true;
+                pointerId = event.pointerId;
+                document.body.classList.add('panel-resizing');
+                try { handle.setPointerCapture(pointerId); } catch (_) { /* ignore */ }
+            });
+
+            handle.addEventListener('pointermove', onPointerMove);
+            handle.addEventListener('pointerup', endDrag);
+            handle.addEventListener('pointercancel', endDrag);
+
+            // Keyboard: the handle is focusable, and arrows nudge the width so
+            // it is not a mouse-only control. A shift modifier makes a coarse
+            // step, matching how drag handles usually behave in editors.
+            handle.addEventListener('keydown', (event) => {
+                if (isPanelCollapsed()) return;
+                const step = event.shiftKey ? 40 : 12;
+                // The panel is on the right, so Left arrow = wider.
+                let delta = 0;
+                if (event.key === 'ArrowLeft') delta = step;
+                else if (event.key === 'ArrowRight') delta = -step;
+                else return;
+                event.preventDefault();
+                applyPanelWidth(panel.getBoundingClientRect().width + delta);
+                try { window.dispatchEvent(new Event('resize')); } catch (_) { /* ignore */ }
+            });
+
+            // A window resize changes the resolved max (it is a viewport share),
+            // so a remembered width can fall outside the new bounds. Re-clamping
+            // keeps the panel legal without discarding the reader's choice: the
+            // stored value is left alone and only the applied width is bounded.
+            window.addEventListener('resize', () => {
+                const current = document.documentElement.style.getPropertyValue('--right-panel-width');
+                if (!current) return;
+                const px = parseFloat(current);
+                if (!Number.isFinite(px)) return;
+                const clamped = clampPanelWidth(px);
+                if (clamped !== px) applyPanelWidth(clamped, { remember: false });
+            });
+        }
+
+        window.initializePanelResize = initializePanelResize;
+
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', () => {
                 setTimeout(initializeDraggablePanels, 100);
                 setTimeout(restorePanelFolds, 120);
                 setTimeout(initializePanelCollapse, 130);
+                setTimeout(initializePanelResize, 140);
             });
         } else {
             setTimeout(initializeDraggablePanels, 100);
             setTimeout(restorePanelFolds, 120);
             setTimeout(initializePanelCollapse, 130);
+            setTimeout(initializePanelResize, 140);
         }
     </script>
     <!--
@@ -3325,4 +4252,3 @@
     <script type="module" src="main.js?v=__BUILD_V__"></script>
 </body>
 </html>
-

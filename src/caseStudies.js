@@ -30,6 +30,57 @@ let onStudyChange = null;
 let onOpenPage = null;
 
 /**
+ * Which arrangement to render: the original card grid, or the row bands.
+ *
+ * `'rows'` puts each proposal and its snapshots together in one band and shows
+ * every proposal at once; `'grid'` is the original three-up picker with a single
+ * drill-down below.
+ *
+ * The default depends on the screen. A wide screen has room for three proposal
+ * cards side by side and a drill-down below them, and the reader can take in the
+ * whole picker at once; a phone cannot, so the row layout — where each proposal
+ * is a self-contained band read in sequence — is the sensible starting point
+ * there. The chosen layout is then remembered, so an explicit choice always
+ * outweighs the device default rather than being reset on the next visit.
+ */
+const LAYOUT_KEY = 'casesLayout';
+
+/** Width at or below which the row layout is the default. Matches the phone
+ *  breakpoint used for the panel and the case-studies styles, so the layout
+ *  switch and the CSS agree on what counts as a small screen. */
+const PHONE_MAX_WIDTH = 720;
+
+let layout = 'grid';
+/** True once a layout has been explicitly chosen, which suppresses the default. */
+let layoutChosen = false;
+
+/** The layout a screen of this width should start in. */
+function defaultLayoutFor(width) {
+    return width <= PHONE_MAX_WIDTH ? 'rows' : 'grid';
+}
+
+function loadLayout() {
+    try {
+        const saved = sessionStorage.getItem(LAYOUT_KEY);
+        if (saved === 'rows' || saved === 'grid') {
+            layout = saved;
+            layoutChosen = true;
+            return;
+        }
+    } catch (_) {
+        // Private mode or storage disabled: fall through to the device default.
+    }
+    layout = defaultLayoutFor(window.innerWidth);
+}
+
+function saveLayout() {
+    try {
+        sessionStorage.setItem(LAYOUT_KEY, layout);
+    } catch (_) {
+        // Non-fatal: the choice simply does not survive a reload.
+    }
+}
+/**
  * The proposals to show in the picker: the built-in three plus anything the
  * visitor added on the Tools page.
  *
@@ -84,6 +135,10 @@ function buildCard(proposal) {
     card.type = 'button';
     card.className = 'case-card';
     card.dataset.proposalId = proposal.id;
+    // The contents list points here in the grid layout, where there are no row
+    // bands. Assigning it in both layouts is what lets one contents list serve
+    // either arrangement without knowing which is showing.
+    card.id = anchorFor(proposal.id);
 
     const thumb = document.createElement('div');
     thumb.className = 'case-thumb';
@@ -218,6 +273,126 @@ function buildPageGrid(studyId) {
 }
 
 /**
+ * DOM id for a proposal's element, in whichever layout is showing.
+ *
+ * One place so the contents list and the rendered markup cannot disagree: the
+ * list was pointing at `proposal-proposal-1` while the band carried
+ * `proposal-proposal-1` and the card carried nothing at all in the grid layout,
+ * so the entry silently jumped nowhere.
+ *
+ * @param {string} studyId
+ * @returns {string}
+ */
+function anchorFor(studyId) {
+    return `proposal-${studyId}`;
+}
+
+/**
+ * Build one proposal band: a full-width header row, then that proposal's
+ * quality snapshots underneath.
+ *
+ * The header is the select button, so clicking anywhere along the row activates
+ * the proposal, and the snapshots sit inside the same bordered box to make the
+ * ownership obvious — the point of this layout is that a proposal and its
+ * results are read as one unit.
+ *
+ * @param {ReturnType<typeof getCaseStudyProposals>[number]} proposal
+ * @returns {HTMLElement}
+ */
+function buildRow(proposal) {
+    const row = document.createElement('div');
+    row.className = 'cases-row';
+    row.dataset.proposalId = proposal.id;
+    // Lets the right-panel contents list link straight to this band. Uses the
+    // shared helper so the id matches what the list points at.
+    row.id = anchorFor(proposal.id);
+
+    const head = document.createElement('button');
+    head.type = 'button';
+    head.className = 'cases-row-head';
+    head.dataset.proposalId = proposal.id;
+    head.setAttribute('aria-pressed', 'false');
+
+    const thumb = document.createElement('div');
+    thumb.className = 'cases-row-thumb';
+    if (proposal.thumbnail) {
+        const img = document.createElement('img');
+        img.src = proposal.thumbnail;
+        img.alt = `${proposal.label} — view of the design proposal`;
+        img.loading = 'lazy';
+        // A stored image can be evicted (storage cleared, or a quota eviction),
+        // so a broken source falls back to the same empty slot as having none.
+        img.addEventListener('error', () => {
+            img.remove();
+            thumb.classList.add('is-missing');
+        });
+        thumb.appendChild(img);
+    } else {
+        thumb.classList.add('is-missing');
+    }
+
+    const meta = document.createElement('div');
+    meta.className = 'cases-row-meta';
+
+    const name = document.createElement('div');
+    name.className = 'cases-row-name';
+    name.textContent = proposal.label;
+
+    // The data badge moves from the thumbnail onto the name line here: at row
+    // width it sits next to the label it qualifies, instead of over a small
+    // image where it would be unreadable.
+    const badge = document.createElement('span');
+    badge.className = proposal.hasData ? 'case-badge' : 'case-badge is-empty';
+    badge.textContent = proposal.hasData ? 'Data available' : 'No data yet';
+    name.appendChild(badge);
+
+    const note = document.createElement('div');
+    note.className = 'cases-row-note';
+    note.textContent = proposal.note;
+
+    meta.append(name, note);
+    head.append(thumb, meta);
+
+    const pages = document.createElement('div');
+    pages.className = 'cases-row-pages';
+    pages.append(...getCaseStudyPages(proposal.id).map(buildPageCard));
+
+    row.append(head, pages);
+    return row;
+}
+
+/**
+ * Fill the container with one band per proposal.
+ *
+ * Every proposal shows its snapshots at once, which is the point of this
+ * layout: the qualities can be compared across proposals by scrolling, rather
+ * than one proposal at a time through the drill-down.
+ */
+function buildRows() {
+    const grid = document.getElementById('casesGrid');
+    if (!grid) return;
+
+    grid.replaceChildren(...getCaseStudyProposals().map(buildRow));
+
+    // Clicks land on either the row header or a snapshot card, so both are
+    // resolved from one listener on the container, which survives rebuilds.
+    if (!grid.dataset.rowsWired) {
+        grid.addEventListener('click', (event) => {
+            const pageCard = event.target.closest('.page-card');
+            if (pageCard && onOpenPage) {
+                onOpenPage(pageCard.dataset.pageId);
+                return;
+            }
+            const head = event.target.closest('.cases-row-head');
+            if (!head) return;
+            requestedId = head.dataset.proposalId;
+            render();
+        });
+        grid.dataset.rowsWired = 'true';
+    }
+}
+
+/**
  * Update the pressed state, the footer explanation, and any active-study
  * labels in the DOM.
  */
@@ -227,10 +402,21 @@ function render() {
 
     const study = resolveStudy(requestedId);
 
-    grid.querySelectorAll('.case-card').forEach((card) => {
-        const isActive = card.dataset.proposalId === study.requested;
-        card.setAttribute('aria-pressed', isActive ? 'true' : 'false');
-    });
+    if (layout === 'rows') {
+        // The band for the active study is highlighted; the rest stay visible
+        // and readable, since all of them are on screen at once here.
+        grid.querySelectorAll('.cases-row').forEach((row) => {
+            const isActive = row.dataset.proposalId === study.requested;
+            row.classList.toggle('is-active', isActive);
+            const head = row.querySelector('.cases-row-head');
+            if (head) head.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+        });
+    } else {
+        grid.querySelectorAll('.case-card').forEach((card) => {
+            const isActive = card.dataset.proposalId === study.requested;
+            card.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+        });
+    }
 
     // Looked up across every study, not just the built-in ones, so the footer
     // can name a proposal the visitor added by upload.
@@ -274,9 +460,11 @@ function render() {
 
     // Reveal the drill-down only once a proposal is chosen, and name that
     // proposal in the heading so it is clear which study's pages are listed.
+    // In the row layout there is no drill-down at all: every band already
+    // carries its own snapshots, so one would repeat a grid that is on screen.
     const drill = document.getElementById('casesDrill');
     if (drill) {
-        drill.hidden = !study.requested;
+        drill.hidden = layout === 'rows' || !study.requested;
         const drillLabel = document.getElementById('casesDrillName');
         if (drillLabel) {
             drillLabel.textContent = proposal ? proposal.label : study.requested;
@@ -286,7 +474,11 @@ function render() {
     // Snapshots belong to the selected proposal, so the grid is rebuilt rather
     // than re-labelled. Keyed on the requested study, not the effective one:
     // a proposal with no data must show empty slots, not Proposal 1's results.
-    if (study.requested !== renderedStudy) {
+    //
+    // Only needed in the grid layout. In the row layout every proposal's
+    // snapshots are built together with its band, so there is nothing to swap
+    // when the selection changes.
+    if (layout === 'grid' && study.requested !== renderedStudy) {
         buildPageGrid(study.requested);
         renderedStudy = study.requested;
     }
@@ -312,9 +504,19 @@ export function initializeCaseStudies(options = {}) {
     const grid = document.getElementById('casesGrid');
     if (!grid) return;
 
+    loadLayout();
+    wireLayoutSwitch();
+    watchViewport();
+    applyLayout();
+
     // The listener is attached once, but the cards are rebuilt on every change
     // to the registry: a proposal added on the Tools page has to appear here, and
     // so does the "Data available" badge once its first file is uploaded.
+    //
+    // Bound on the container, which survives rebuilds. In the row layout a
+    // second listener handles the headers and snapshot cards; both are attached
+    // once and each ignores markup that is not its own, so neither needs to be
+    // torn down when the layout changes underneath it.
     if (!grid.dataset.wired) {
         grid.addEventListener('click', (event) => {
             const card = event.target.closest('.case-card');
@@ -339,12 +541,104 @@ export function initializeCaseStudies(options = {}) {
     render();
 }
 
-/** Replace every proposal card with the current study list. */
+/** Replace every proposal card with the current study list, in the current layout. */
 function rebuildPicker() {
     const grid = document.getElementById('casesGrid');
     if (!grid) return;
-    grid.innerHTML = '';
-    getCaseStudyProposals().forEach((proposal) => grid.appendChild(buildCard(proposal)));
+    if (layout === 'rows') {
+        buildRows();
+    } else {
+        grid.innerHTML = '';
+        getCaseStudyProposals().forEach((proposal) => grid.appendChild(buildCard(proposal)));
+    }
+}
+
+/**
+ * Put the chosen layout into effect on the section, and rebuild the contents.
+ *
+ * The class drives the CSS; the rebuild is what changes the markup, since the
+ * two layouts are different elements rather than one element re-styled.
+ */
+function applyLayout() {
+    const section = document.getElementById('caseStudies');
+    if (section) section.classList.toggle('cases-rows', layout === 'rows');
+    rebuildPicker();
+    renderedStudy = null;
+    syncLayoutSwitch();
+}
+
+/** Reflect the current layout in the switch's pressed states. */
+function syncLayoutSwitch() {
+    const rowsBtn = document.getElementById('casesLayoutRows');
+    const gridBtn = document.getElementById('casesLayoutGrid');
+    if (rowsBtn) rowsBtn.setAttribute('aria-pressed', String(layout === 'rows'));
+    if (gridBtn) gridBtn.setAttribute('aria-pressed', String(layout === 'grid'));
+}
+
+/** Bind the layout switch, once. */
+function wireLayoutSwitch() {
+    const rowsBtn = document.getElementById('casesLayoutRows');
+    const gridBtn = document.getElementById('casesLayoutGrid');
+    if (rowsBtn && !rowsBtn.dataset.wired) {
+        rowsBtn.dataset.wired = 'true';
+        rowsBtn.addEventListener('click', () => setCaseStudiesLayout('rows'));
+    }
+    if (gridBtn && !gridBtn.dataset.wired) {
+        gridBtn.dataset.wired = 'true';
+        gridBtn.addEventListener('click', () => setCaseStudiesLayout('grid'));
+    }
+    syncLayoutSwitch();
+}
+
+/**
+ * Switch between the row and grid layouts, persist it, and re-render.
+ *
+ * Exported so the switch can be driven from the UI or the console while the two
+ * are being compared. Passing nothing toggles.
+ *
+ * @param {'rows'|'grid'} [next]
+ */
+export function setCaseStudiesLayout(next) {
+    const target = next === 'rows' || next === 'grid' ? next : layout === 'rows' ? 'grid' : 'rows';
+    if (target === layout) return;
+    layout = target;
+    // Marked as chosen even when it happens to match the device default: the
+    // point is that a person decided, so a later viewport change must not
+    // silently reverse it.
+    layoutChosen = true;
+    saveLayout();
+    applyLayout();
+    render();
+}
+
+/**
+ * Follow the device default again after a viewport change.
+ *
+ * Only does anything when the visitor has not chosen a layout themselves, so a
+ * deliberate choice survives rotating a phone or resizing a window. Called on
+ * resize, which is the only way the breakpoint can be crossed without a reload.
+ */
+function followDeviceDefault() {
+    if (layoutChosen) return;
+    const next = defaultLayoutFor(window.innerWidth);
+    if (next === layout) return;
+    layout = next;
+    applyLayout();
+    render();
+}
+
+/** Watch for the viewport crossing the breakpoint, so the default tracks it. */
+function watchViewport() {
+    window.addEventListener('resize', () => {
+        // Cheap: `followDeviceDefault` returns immediately once a choice has
+        // been made, so this does not re-render on every resize event.
+        followDeviceDefault();
+    });
+}
+
+/** The layout currently in use, so callers can label a toggle correctly. */
+export function getCaseStudiesLayout() {
+    return layout;
 }
 
 /**
@@ -400,7 +694,12 @@ export function revealProposal(id) {
     const grid = document.getElementById('casesGrid');
     if (!grid) return;
 
-    const card = grid.querySelector(`.case-card[data-proposal-id="${CSS.escape(id)}"]`);
+    // The two layouts mark the target differently: a card, or a row band. Both
+    // are scrolled to and outlined, since the point is to find the proposal the
+    // visitor asked to see rather than to know which element type it is.
+    const card =
+        grid.querySelector(`.case-card[data-proposal-id="${CSS.escape(id)}"]`) ||
+        grid.querySelector(`.cases-row[data-proposal-id="${CSS.escape(id)}"]`);
     if (!card) return;
 
     card.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -410,6 +709,96 @@ export function revealProposal(id) {
     // movement caused by the scroll above.
     card.classList.add('is-revealed');
     window.setTimeout(() => card.classList.remove('is-revealed'), 1600);
+}
+
+/**
+ * Build the right panel's contents list for this page.
+ *
+ * Lists the proposals, not their quality pages: the qualities are already laid
+ * out as snapshot cards inside each band, and naming all of them here would
+ * produce a list longer than the page it describes. One entry per proposal is
+ * what makes the list useful for jumping between studies.
+ *
+ * Rebuilt rather than built once, because proposals can be added on the Tools
+ * page and the list has to include them.
+ *
+ * @param {HTMLElement} tocEl    The <nav> in the right panel
+ * @param {HTMLElement} scrollEl The element that actually scrolls
+ */
+export function buildCaseStudiesToc(tocEl, scrollEl) {
+    if (!tocEl) return;
+
+    const proposals = getCaseStudyProposals();
+    if (!proposals.length) {
+        tocEl.innerHTML = '<div class="toc-empty">No proposals yet.</div>';
+        return;
+    }
+
+    // Grouped by heading rather than rendered flat: the entries sit under the
+    // same "Design proposals" label the page uses, so the panel and the page
+    // read as the same structure.
+    const list = document.createElement('ul');
+    list.className = 'toc-list';
+
+    proposals.forEach((proposal) => {
+        const item = document.createElement('li');
+        item.className = 'toc-item toc-level-2';
+
+        const link = document.createElement('a');
+        link.className = 'toc-link';
+        link.href = `#${anchorFor(proposal.id)}`;
+        link.textContent = proposal.label;
+        // Points at whatever element carries the proposal's id, which differs by
+        // layout: a row band in the row view, a card in the grid view. Resolved
+        // through `anchorFor` so the two cannot drift apart.
+        link.dataset.target = anchorFor(proposal.id);
+        // Marks a proposal with no results, matching the badge on its band, so
+        // the panel does not imply every entry has something behind it.
+        if (!proposal.hasData) {
+            const flag = document.createElement('span');
+            flag.className = 'toc-flag';
+            flag.textContent = 'no data';
+            link.appendChild(flag);
+        }
+
+        item.appendChild(link);
+        list.appendChild(item);
+    });
+
+    tocEl.innerHTML = '';
+    tocEl.appendChild(list);
+
+    // Bound once per element: the list is rebuilt whenever a proposal is added,
+    // and re-adding the listener would stack duplicates that each scroll the
+    // page on a single click.
+    if (!tocEl.dataset.casesWired) {
+        tocEl.dataset.casesWired = 'true';
+        tocEl.addEventListener('click', (event) => {
+            const link = event.target.closest('a.toc-link');
+            if (!link) return;
+            const target = document.getElementById(link.dataset.target);
+            if (!target) return;
+            event.preventDefault();
+
+            // Scrolled by hand rather than with `scrollIntoView`: the target is
+            // inside the overlay's own scroller, and `scrollIntoView` walks up
+            // to the nearest scrollable ancestor and can move the page behind
+            // the overlay as well.
+            const scroller = scrollEl || document.getElementById('caseStudies');
+            if (!scroller) return;
+            const offset = target.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+            scroller.scrollTo({ top: Math.max(0, scroller.scrollTop + offset - 14), behavior: 'smooth' });
+
+            // Selecting the proposal on the way in: the row (or card) is
+            // highlighted and the assessment pages switch to it, which is what
+            // clicking the proposal itself does.
+            const id = target.dataset.proposalId;
+            if (id) {
+                requestedId = id;
+                render();
+            }
+        });
+    }
 }
 
 /**

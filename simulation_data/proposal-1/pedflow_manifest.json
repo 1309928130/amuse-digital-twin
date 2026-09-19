@@ -1,0 +1,42 @@
+{
+  "network_flow": {
+    "path": "simulation_data/network_flow_edges.json",
+    "source_flows": "output/model_runs/edge_flows_from_cell66_3__20260820_171209.parquet",
+    "source_graph": "output/network/G_projected.graphml",
+    "n_edges": 28150,
+    "min_flow_filter": 1.0,
+    "bbox_pad_deg": 0.002,
+    "bounds": {
+      "west": 4.8571395,
+      "east": 4.8924243,
+      "south": 52.332078,
+      "north": 52.344503
+    },
+    "flow_min": 1.0000206659606192,
+    "flow_max": 5087.887025713921,
+    "flow_p50": 27.740965357683308,
+    "flow_p90": 348.14874323728515,
+    "flow_p95": 627.7390960188145,
+    "unit": "pedestrians per day (sum of hourly)",
+    "hourly_unit": "pedestrians per hour",
+    "colormap": "YlOrRd"
+  },
+  "pedestrian_demand": {
+    "path": "simulation_data/pedestrian_demand.json",
+    "source_trips": "output/generated_trips.csv",
+    "n_points": 6765,
+    "bbox_pad_deg": 0.002,
+    "bounds": {
+      "west": 4.8571395,
+      "east": 4.8924243,
+      "south": 52.332078,
+      "north": 52.344503
+    },
+    "demand_min": 9.5564852481045e-05,
+    "demand_max": 5087.026412303242,
+    "demand_p95": 5.003825291564222,
+    "demand_sum": 35174.08694589631,
+    "unit": "trips per day",
+    "scale_note": "Display intensity capped at P95 for color mapping"
+  }
+}

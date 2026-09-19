@@ -17,9 +17,11 @@
     "download-3dbag": "node download-3dbag-tiles.js",
     "sync-docs": "node tools/sync-framework-doc.mjs",
     "check-docs": "node tools/sync-framework-doc.mjs --check",
+    "check-gtfs": "node tools/fetch-gtfs-snapshot.mjs --check",
+    "fetch-gtfs": "node tools/fetch-gtfs-snapshot.mjs",
     "build-deploy": "node tools/build-firebase-deploy.mjs",
     "capture-thumbs": "node tools/capture-page-thumbnails.mjs --study proposal-1",
-    "deploy": "node tools/sync-framework-doc.mjs && node tools/build-firebase-deploy.mjs && npx firebase deploy --only hosting"
+    "deploy": "node tools/sync-framework-doc.mjs && node tools/fetch-gtfs-snapshot.mjs --check; node tools/build-firebase-deploy.mjs && npx firebase deploy --only hosting"
   },
   "keywords": [
     "cesium",

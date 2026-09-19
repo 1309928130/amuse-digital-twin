@@ -16,10 +16,17 @@
  * converts them. Composite values (Math.atan2(...)) can be supplied directly.
  */
 
-/** Station square / station front block (micro-mobility scope). */
-export const STATION_SQUARE_CENTER = {
-    longitude: 4.872844838304281,
-    latitude: 52.33886029227803,
+/**
+ * Centre of the simulated street.
+ *
+ * The Kova run's own centroid, computed from `agent_trajectories.json` (24,925
+ * points). Replaced the station-square centre, which is no longer where the
+ * study is: the station front sits about 595 m east of this street, so anything
+ * anchored on it framed empty ground.
+ */
+export const STREET_CENTER = {
+    longitude: 4.866146,
+    latitude: 52.336591,
 };
 
 export const PAGE_IDS = [
@@ -213,12 +220,26 @@ function register(def) {
  * overview so switching to (or from) it reads as a clear zoom + move, and the
  * station square fills the view.
  */
-const STATION_SQUARE_VIEWPOINT = {
-    longitude: 4.8750,
-    latitude: 52.3352,
-    height: 420,
-    headingDeg: -22,
-    pitchDeg: -42,
+/**
+ * Plan view of the simulated street.
+ *
+ * Moved from lon 4.8750/lat 52.3352, which framed the station plaza that this
+ * study no longer covers: the Kova run is centred on 4.8661/52.3366, so the old
+ * preset pointed about 595 m east of the data and the trajectories sat off the
+ * edge of the frame.
+ *
+ * Framed from the trajectories themselves rather than by eye: the run spans
+ * 241 m east-west and 295 m north-south about that centroid, so 320 m of height
+ * holds the whole street with a little margin. The heading looks up the street's
+ * principal axis, which the point cloud puts at 46 deg from north, so the street
+ * runs away from the camera rather than across it.
+ */
+const STREET_PLAN_VIEWPOINT = {
+    longitude: 4.866146,
+    latitude: 52.336591,
+    height: 320,
+    headingDeg: 46,
+    pitchDeg: -50,
 };
 
 /**
@@ -246,7 +267,7 @@ const OVERVIEW_VIEWPOINT = {
  * It stays deliberately distinct from:
  *
  *  - `OVERVIEW_VIEWPOINT`   — pedestrian flow, the largest coverage
- *  - `STATION_SQUARE_VIEWPOINT` — micro-mobility, the smallest
+ *  - `STREET_PLAN_VIEWPOINT` — micro-mobility, over the simulated street
  *
  * Keeping one shared preset means the quality pages all read as the same place,
  * so switching between them does not move the camera and the eye can compare
@@ -294,26 +315,92 @@ register({
     },
 });
 
+/**
+ * Street-level viewpoint for the micro-mobility page, used by its
+ * "Walk view" button.
+ *
+ * Everything else on the quality-assessment set is framed from above, which is
+ * right for reading a plan and wrong for reading a walk: at 400 m a person is
+ * sub-pixel, so queueing, avoidance and following — the behaviours a CA
+ * simulation exists to show — are invisible. This drops the camera to a little
+ * above head height and pulls back to the edge of the square, so several agents
+ * can be watched at once from roughly a passer-by's eye level.
+ *
+ * It is a button rather than the page default because the plan view is what the
+ * page is for; the walk view is a second reading of the same data, offered on
+ * request rather than imposed.
+ *
+ * `height` is metres above the ellipsoid, and the Kova ground sits at ~0, so
+ * 4 m is a raised observer: high enough to see over the agent in front, low
+ * enough that the figures still read as people rather than as a plan.
+ */
+export const MICRO_STREET_VIEW = {
+    // Derived from the exported Kova trajectories rather than picked by eye:
+    // this is the densest 20 m cell of pedestrian traffic in the run
+    // (1,400 recorded points pass through it), so a street-level camera here
+    // stands where agents actually walk.
+    //
+    // The previous hand-written preset was 186 m away -- 161 m south and 93 m
+    // east of the trajectory centroid -- which put the camera on empty pavement
+    // and made the trajectories look mis-georeferenced when they were not.
+    // If the Kova run is re-exported, re-derive this from
+    // agent_trajectories.json rather than nudging it by hand.
+    longitude: 4.866444,
+    latitude: 52.336889,
+    // Raised from 4.2 to 9.2 m at the reviewer's request, to look slightly down
+    // on the street rather than along it at head height.
+    height: 9.2,
+    headingDeg: 22,
+    // A shallow downward tilt. Looking level would put the horizon mid-frame and
+    // waste half the viewport on sky.
+    //
+    // Steepened from -14 to -19 deg in the same pass, so the extra height is
+    // spent on the ground the trajectories occupy rather than on the horizon.
+    // The two changes belong together: raising the camera without tilting it
+    // down would have shown more sky, not more street.
+    pitchDeg: -19,
+};
+
 register({
     id: 'flow-micro',
     label: 'Micro-mobility',
     title: 'Microscopic pedestrian flow (station square)',
     group: 'Movement',
-    // Smallest coverage: square in front of Amsterdam Zuid — low and close
-    camera: { ...STATION_SQUARE_VIEWPOINT },
-    layers: { networkFlow: false, pedDemand: true, urbanHeat: false, sunlight: false, wind: false },
+    // Street level. The exported trajectories are read as people walking, and
+    // this page is the only one framed closely enough for a person to be
+    // visible at all; the plan view is available on the flow pages, which is
+    // where a plan is actually the useful reading, so there is no toggle here.
+    camera: { ...MICRO_STREET_VIEW },
+    // `sunlight: true` here is for the environment, not for the analysis.
+    //
+    // This page is read at eye level against the 3D Zuidas tileset, and the sun
+    // mesh is what gives that scene a lit, legible setting -- without it the
+    // street reads flat and grey. The quantitative reading on this page is the
+    // trajectories, so the sun layer is scenery rather than evidence, and the
+    // legend still describes it as the measured field it is.
+    layers: { trajectories: true, networkFlow: false, pedDemand: false, urbanHeat: false, sunlight: true, wind: false },
+    // This page draws walking figures rather than dots: it is the one page read
+    // at eye level, and the figure is the point of that reading.
+    avatarMode: 'figure',
     linkTooltip: 'click',
-    sections: ['layers', 'micro-scope', 'legend-demand', 'validity'],
+    sections: ['layers', 'transport', 'legend-sunlight', 'micro-scope', 'legend-trajectories', 'validity'],
     validity: {
-        rating: 'low',
+        rating: 'medium',
         basis:
-            'No SUMO microsimulation is exported to the viewer yet, so what is shown here ' +
-            'is the daily demand field standing in for the microscopic trajectories. Treat ' +
-            'it as a scope illustration, not a validated micro-scale result.',
+            'Trajectories are the raw output of the Kova 1.2.0 cellular-automata run: agent ' +
+            'positions per iteration are recorded directly, not fitted. What limits validity is ' +
+            'the input rather than the recording — agent counts, gate/target programs and ' +
+            'sociability domains are scenario assumptions, and the CA moves agents on a ' +
+            'discrete grid, so apparent path detail below one grid cell is an artefact of ' +
+            'cell-hopping rather than walking behaviour. Speeds are metres per second only ' +
+            'by way of a nominal seconds-per-iteration constant, because Kova defines no ' +
+            'wall-clock duration; the number is plausible, not measured. The check that ' +
+            'matters is reachability: a run whose agents cannot reach their targets ' +
+            'oscillates between a few cells, which still produces normal-looking step ' +
+            'lengths and a normal-looking speed. Compare path length against net ' +
+            'displacement — a detour ratio far above one means the agent covered no ' +
+            'ground, and the viewer marks such paths rather than drawing them as routes.',
     },
-    placeholder:
-        'SUMO microscopic trajectories for the station square are not exported to the web viewer yet. ' +
-        'The daily pedestrian demand field is shown as a stand-in; run the OD matrix export to populate this page.',
 });
 
 register({
@@ -398,7 +485,24 @@ register({
     title: 'Traffic pollution',
     group: 'Environmental comfort',
     camera: { ...SITE_BLOCK_VIEWPOINT },
-    layers: { sunlight: false, urbanHeat: false, networkFlow: false, wind: false, pollution: true },
+    // The Zuidas massing is turned on alongside the pollution field, so the
+    // concentration is read against the buildings and street layout that
+    // produced it. Without it the dots hover over bare ground and the trapping
+    // zones have no visible cause.
+    //
+    // This means the page cannot use `sunlight` to reveal the massing: that
+    // layer fires `hideDesignGlbs()` and switches the buildings off, which is
+    // the opposite of what is wanted here. The page loads the massing itself
+    // instead, via `ensureDesignModel()`, which is a no-op whenever another
+    // layer has already put it in the scene.
+    layers: {
+        sunlight: false,
+        urbanHeat: false,
+        networkFlow: false,
+        wind: false,
+        pollution: true,
+        designMassing: true,
+    },
     linkTooltip: 'click',
     sections: ['layers', 'legend-pollution', 'placeholder-method', 'validity'],
     validity: {
@@ -475,11 +579,11 @@ register({
     label: 'Visual quality',
     title: 'Visual quality (street level)',
     group: 'Perception',
-    // Deliberately the station-square framing used by micro-mobility rather
-    // than the site-block view the other quality pages share: this assessment
-    // is read at eye level, where the visual-quality indicators are defined,
-    // and the wider site framing puts the camera too far away to judge them.
-    camera: { ...STATION_SQUARE_VIEWPOINT },
+    // Deliberately the street framing used by micro-mobility rather than the
+    // site-block view the other quality pages share: this assessment is read at
+    // eye level, where the visual-quality indicators are defined, and the wider
+    // site framing puts the camera too far away to judge them.
+    camera: { ...STREET_PLAN_VIEWPOINT },
     layers: { sunlight: false, urbanHeat: false, networkFlow: false, wind: false },
     linkTooltip: 'click',
     sections: ['layers', 'legend-visual-quality', 'placeholder-method', 'validity'],
@@ -528,17 +632,24 @@ register({
         sunlight: true,
         wind: true,
         pollution: true,
+        // Kova trajectories are included so the synthesis view can read pedestrian
+        // movement against the environmental layers. They are absent for proposals
+        // without a Kova run, which leaves the other layers unaffected.
+        trajectories: true,
     },
     // In the synthesis view links are read-only: click to inspect, never hover.
     linkTooltip: 'click',
     sections: [
         'layers',
+        'transport',
+        'overlap-note',
         'legend-flow',
         'legend-demand',
         'legend-heat',
         'legend-sunlight',
         'legend-wind',
         'legend-pollution',
+        'legend-trajectories',
         'validity',
     ],
     validity: {
@@ -565,7 +676,9 @@ register({
     camera: { ...OVERVIEW_VIEWPOINT },
     layers: { networkFlow: false, pedDemand: false, urbanHeat: false, sunlight: false, wind: false },
     linkTooltip: 'click',
-    sections: ['cases-list'],
+    // `cases-toc` is the right-panel contents list: one entry per proposal,
+    // jumping to that proposal's band on the page.
+    sections: ['cases-list', 'cases-toc'],
     // A choice between studies rather than a place: the proposal picker takes
     // over the viewport, the same way a document page does.
     cases: true,
@@ -574,7 +687,7 @@ register({
 register({
     id: 'tools',
     label: 'Tools',
-    title: 'Tools — bring your own data',
+    title: 'Tools — process your own data',
     group: 'About',
     // Not a place on the map but a working surface, so it takes over the
     // viewport and leaves the camera where it was.

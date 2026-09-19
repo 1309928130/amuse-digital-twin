@@ -305,7 +305,7 @@ function buildToc(container, tocEl, scrollEl) {
  */
 export function buildToolsToc(container, tocEl) {
     if (!container || !tocEl) return;
-    // The page heading ("Tools") is skipped: it is the page's own name, and a
+    // The page heading is skipped: it is the page's own name, and a
     // contents entry pointing at the top of the page a reader is already looking
     // at is noise. The blocks are the sections worth listing.
     //

@@ -19,18 +19,56 @@ export const ZUIDAS_CENTER = {
 };
 
 // GTFS-realtime API configuration
+//
+// Where live vehicle data comes from, and why it is derived rather than fixed.
+//
+// The feed lives behind OVapi, which sends no CORS headers, so a browser on
+// another origin cannot read it. In development a small local proxy solves
+// that (see start-all.js). On the deployed site there is no proxy: Firebase
+// Hosting serves static files only, and a server-side proxy would need Cloud
+// Functions, which needs the Blaze plan.
+//
+// The endpoint is therefore chosen from the page's own origin. A hardcoded
+// `http://localhost:3000/...` silently failed on the deployed HTTPS site for
+// two reasons at once — it is mixed content, which the browser blocks outright,
+// and it points at the *visitor's* machine rather than any server. Crucially,
+// a blocked request surfaces as "Failed to fetch" rather than any HTTP status,
+// so the 429 fallback in gtfsRealtime.js never ran and no vehicles appeared.
+//
+// On a deployed origin we therefore go straight to the bundled snapshot:
+// vehicles are always visible and never rate-limited. On localhost the proxy is
+// preferred for live data, with the snapshot as the fallback.
+const IS_LOCAL_HOST = (() => {
+    try {
+        const host = window.location.hostname;
+        return host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host === '';
+    } catch (_) {
+        return false;
+    }
+})();
+
+// The snapshot is bundled with the site in both cases, so this path is valid
+// wherever the page is served from.
+const STATIC_SNAPSHOT_PATH = './data/static-gtfs/vehiclePositions.pb';
+
 export const GTFS_CONFIG = {
+    // True when a local proxy is available, i.e. we are on a dev machine.
+    // The UI uses this to describe the layer honestly rather than implying
+    // live data is available everywhere.
+    hasLiveFeed: IS_LOCAL_HOST,
     // OVapi GTFS-realtime endpoints (Netherlands public transport)
     baseUrl: 'https://gtfs.ovapi.nl/nl/',
-    // Use proxy server to bypass CORS (run: node proxy-server.js)
-    vehiclePositionsEndpoint: 'http://localhost:3000/gtfs/vehiclePositions.pb',
+    // Local proxy when developing; the bundled snapshot when deployed.
+    vehiclePositionsEndpoint: IS_LOCAL_HOST
+        ? 'http://localhost:3000/gtfs/vehiclePositions.pb'
+        : STATIC_SNAPSHOT_PATH,
     // Direct endpoint (blocked by CORS): 'https://gtfs.ovapi.nl/nl/vehiclePositions.pb',
     tripUpdatesEndpoint: 'https://gtfs.ovapi.nl/nl/tripUpdates.pb',
     trainUpdatesEndpoint: 'https://gtfs.ovapi.nl/nl/trainUpdates.pb',
     // Static/historical data endpoints
     archiveBaseUrl: 'https://gtfs.ovapi.nl/nl/archive/',
     staticDataDir: './data/static-gtfs/', // Local directory for downloaded static data
-    staticDataEndpoint: './data/static-gtfs/vehiclePositions.pb', // Local static vehicle positions file
+    staticDataEndpoint: STATIC_SNAPSHOT_PATH, // Local static vehicle positions file
     staticScheduleFile: './data/static-gtfs/gtfs-nl.zip', // Local static GTFS schedule data (routes, stops, schedules)
     useStaticScheduleData: false, // Disabled: schedule-based simulation is too heavy. Use static snapshots instead.
     // Alternative: use a mock data endpoint for development

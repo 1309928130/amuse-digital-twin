@@ -853,7 +853,7 @@ function render() {
     head.className = 'tools-head';
 
     const h2 = document.createElement('h2');
-    h2.textContent = 'Tools';
+    h2.textContent = 'Tools — process your own data';
     head.appendChild(h2);
 
     const lede = document.createElement('p');

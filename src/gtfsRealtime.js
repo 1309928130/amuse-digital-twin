@@ -100,12 +100,31 @@ async function fetchGTFSData() {
                 console.log(`Received ${arrayBuffer.byteLength} bytes of GTFS-realtime data`);
                 return await parseGTFSRealtime(arrayBuffer);
             } catch (fetchError) {
-                if (fetchError.message.includes('CORS') || fetchError.message.includes('Failed to fetch')) {
-                    console.error('CORS error: OVapi does not allow direct browser access.');
-                    console.error('Solutions:');
-                    console.error('1. Use mock data: Set GTFS_CONFIG.useMockData = true in config.js');
-                    console.error('2. Set up a proxy server (see PROXY_SETUP.md)');
-                    console.error('3. Use a CORS proxy service (not recommended for production)');
+                // A blocked request never reaches the status handling above: a
+                // CORS rejection or a mixed-content block (https page fetching
+                // http://localhost) fails at the network layer and throws here
+                // instead, with no HTTP status to inspect. Previously this only
+                // logged advice and rethrew, so the bundled snapshot was never
+                // tried and the deployed site showed no vehicles at all.
+                const blocked =
+                    fetchError.message.includes('CORS') ||
+                    fetchError.message.includes('Failed to fetch') ||
+                    fetchError.message.includes('NetworkError') ||
+                    fetchError.message.includes('Mixed Content');
+                if (blocked) {
+                    console.warn(`Could not reach ${GTFS_CONFIG.vehiclePositionsEndpoint} (${fetchError.message}). Trying the bundled snapshot…`);
+                    try {
+                        const fallback = await fetch(GTFS_CONFIG.staticDataEndpoint, { cache: 'no-store' });
+                        if (fallback.ok) {
+                            const arrayBuffer = await fallback.arrayBuffer();
+                            if (arrayBuffer && arrayBuffer.byteLength > 0) {
+                                console.log(`Using bundled GTFS snapshot (${arrayBuffer.byteLength} bytes)`);
+                                return await parseGTFSRealtime(arrayBuffer);
+                            }
+                        }
+                    } catch (fallbackErr) {
+                        console.warn('Bundled GTFS snapshot unavailable:', fallbackErr.message || fallbackErr);
+                    }
                 }
                 throw fetchError;
             }
@@ -255,7 +274,30 @@ export async function startGTFSUpdates() {
         
         const data = await fetchGTFSData();
         processGTFSData(data);
-        
+
+        // A snapshot that decodes to nothing is a failure worth naming. A
+        // truncated .pb (an interrupted download) parses to an empty feed
+        // rather than throwing, so without this the layer would quietly show
+        // zero vehicles and look like a styling bug rather than bad data. The
+        // feeds bundled in this repo were in exactly that state.
+        if (!GTFS_CONFIG.hasLiveFeed && (!data || !data.vehicles || data.vehicles.length === 0)) {
+            console.warn(
+                'The bundled GTFS snapshot produced no vehicles. The file is most likely ' +
+                'truncated or corrupt — re-download data/static-gtfs/vehiclePositions.pb ' +
+                'and check it decodes. The transit layer will be empty until then.'
+            );
+        }
+
+        // With no live feed the endpoint is the bundled snapshot, which never
+        // changes. Re-polling it on an interval would issue an identical request
+        // every 45s for the life of the page, so it is fetched once and left
+        // alone. The layer still renders; it just does not pretend to update.
+        if (!GTFS_CONFIG.hasLiveFeed) {
+            console.log('No live feed on this origin — showing the bundled snapshot. Not polling for updates.');
+            updateIntervalId = null;
+            return;
+        }
+
         updateIntervalId = setInterval(async () => {
             try {
                 // Check if we should skip this update due to recent rate limiting

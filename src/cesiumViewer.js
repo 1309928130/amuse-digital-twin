@@ -128,6 +128,26 @@ export function initializeViewer(containerId = 'cesiumContainer') {
         }
     }
 
+    // --- Antialiasing ---
+    //
+    // Nothing was set here, so every knob fell to Cesium's defaults, which are
+    // decided from the GPU and the device pixel ratio. That made line quality
+    // vary between browsers on the same scene: thin route curves looked rounded
+    // in one browser and faceted in another, on identical data and identical
+    // geometry.
+    //
+    // MSAA is not a reliable lever for this. `msaaSamples` is negotiated with
+    // the driver and can come back as 1 (no antialiasing at all, as measured in
+    // the Cursor webview) even when a value is requested, so a scene cannot
+    // depend on it being honoured.
+    //
+    // FXAA is a post-process, so it needs no multisampled framebuffer and gives
+    // the same result on every machine. It is slightly soft rather than truly
+    // accurate, which is the right trade here: the routes are 1-2 px curves
+    // where "smooth" matters more than pixel-exactness, and it costs one
+    // full-screen pass.
+    scene.postProcessStages.fxaa.enabled = true;
+
     // Configure fog for better depth perception
     scene.fog.enabled = true;
     scene.fog.density = 0.0002;

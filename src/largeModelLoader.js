@@ -222,271 +222,56 @@ export async function loadLargeModel(modelUrl, position, options = {}) {
     // Store model reference
     loadedModels.set(entity.id, entity);
     
-    // Wait for model to load with progress tracking
-    return new Promise((resolve, reject) => {
-        let settled = false;
-        const finish = (fn, value) => {
-            if (settled) return;
-            settled = true;
+    // ## Why this does not wait for the model to be "ready"
+    //
+    // It used to. Roughly 260 lines polled `entity.model.readyPromise` and
+    // `entity.model.ready`, with a 5-minute poll and error handling for stack
+    // overflows and out-of-memory conditions. None of it ever ran, and the
+    // reason is worth recording so it is not re-added:
+    //
+    //   * `entity.model` is a **`ModelGraphics`** -- the declarative
+    //     *description* of a model, whose keys are `_uri`, `_scale`, `_color`
+    //     and their `*Subscription` handles. It has no `ready`, no
+    //     `readyPromise` and no `_runtime`; those belong to `Cesium.Model`,
+    //     which Cesium creates privately inside its own visualizer and never
+    //     exposes on the entity.
+    //   * `Cesium.Model.fromGltfAsync` is not an alternative: measured on this
+    //     build (Cesium 1.110) it resolves almost immediately to an
+    //     unpopulated object that reports `ready === false` forever, has no
+    //     `readyPromise`, and throws on `boundingSphere`.
+    //
+    // So there is no readiness signal to wait on for either the Zuidas massing
+    // or the Ladybug sunlight mesh, and every branch of the old code was
+    // unreachable -- including the `✓ Model loaded` logs, which had never once
+    // printed. The timeout was therefore the *entire* wait rather than a safety
+    // net, which is why it appeared as a fixed 12 s no matter how small the
+    // file was.
+    //
+    // Cesium composites the mesh on its own schedule. The honest behaviour is
+    // to add the entity and return, letting the caller proceed: the model will
+    // appear when it appears, and nothing here can know sooner.
+    //
+    // `readyTimeoutMs` is retained because callers pass it and it now means
+    // "how long to hold the loading indicator", not "how long to wait for
+    // ready". Nothing blocks on it.
+    const readyTimeoutMs = options.readyTimeoutMs != null ? options.readyTimeoutMs : 12000;
+    if (readyTimeoutMs > 0) {
+        setTimeout(() => {
             if (loadingIndicator) loadingIndicator.style.display = 'none';
-            fn(value);
-        };
-
-        // Failsafe: small exports can hang on readyPromise (esp. with bad heightReference).
-        // Unblock UI after readyTimeoutMs even if Cesium is still warming up.
-        const readyTimeoutMs = options.readyTimeoutMs != null ? options.readyTimeoutMs : 12000;
-        const failsafe = setTimeout(() => {
-            if (settled) return;
-            console.warn(`[LargeModel] readyPromise slow (>${readyTimeoutMs}ms) for ${fileLabel}; continuing anyway`);
-            try { forceModelOpacity(entity, entity.model); } catch (_) { /* ignore */ }
-            finish(resolve, entity);
         }, readyTimeoutMs);
+    } else if (loadingIndicator) {
+        loadingIndicator.style.display = 'none';
+    }
 
-        // Function to check model status
-        const checkModelStatus = () => {
-            const model = entity.model;
-            
-            if (!model) {
-                // Model property not yet available, wait a bit and check again
-                setTimeout(checkModelStatus, 100);
-                return;
-            }
-            
-            checkModelReady(model);
-        };
-        
-        const checkModelReady = (model) => {
-            // Check if model is already ready
-            if (model.ready) {
-                const loadTime = ((Date.now() - startTime) / 1000).toFixed(2);
-                console.log(`[LargeModel] ✓ Model already loaded: ${modelUrl} (${loadTime}s)`);
-                
-                // Force model to be fully opaque
-                forceModelOpacity(entity, model);
-                clearTimeout(failsafe);
-                finish(resolve, entity);
-                return;
-            }
-            
-            // Check if readyPromise exists
-            if (!model.readyPromise) {
-                // If no readyPromise, wait a bit and check again
-                setTimeout(() => {
-                    if (model.ready) {
-                        const loadTime = ((Date.now() - startTime) / 1000).toFixed(2);
-                        console.log(`[LargeModel] ✓ Model loaded: ${modelUrl} (${loadTime}s)`);
-                        
-                        // Force opacity after model is ready
-                        forceModelOpacity(entity, model);
-                        clearTimeout(failsafe);
-                        finish(resolve, entity);
-                    } else {
-                        // Try to get readyPromise again
-                        if (model.readyPromise) {
-                            setupPromiseHandler(model);
-                        } else {
-                            // Fallback: poll for ready state
-                            pollForReady(model, entity);
-                        }
-                    }
-                }, 500);
-                return;
-            }
-            
-            setupPromiseHandler(model);
-        };
-        
-        const setupPromiseHandler = (model) => {
-            // Show progress updates
-            const progressInterval = setInterval(() => {
-                if (settled) {
-                    clearInterval(progressInterval);
-                    return;
-                }
-                if (loadingIndicator) {
-                    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-                    loadingIndicator.textContent = `Loading ${fileLabel}... ${elapsed}s elapsed`;
-                }
-            }, 1000);
-            
-            model.readyPromise.then(() => {
-                clearInterval(progressInterval);
-                clearTimeout(failsafe);
-                const loadTime = ((Date.now() - startTime) / 1000).toFixed(2);
-                console.log(`[LargeModel] ✓ Model loaded: ${modelUrl} (${loadTime}s)`);
-                
-                // Force model to be fully opaque
-                forceModelOpacity(entity, model);
-                
-                // Enhance lighting to show different face brightness
-                try {
-                    // Access the model's primitive to enable better lighting
-                    if (model._runtime && model._runtime.primitive) {
-                        const primitive = model._runtime.primitive;
-                        if (primitive) {
-                            // Enable lighting on the primitive
-                            // This helps different faces show different brightness based on their orientation
-                            if (primitive.lightColor !== undefined) {
-                                primitive.lightColor = new Cesium.Cartesian3(1.0, 1.0, 1.0); // White light
-                            }
-                            // Ensure lighting is enabled
-                            if (primitive.enableLighting !== undefined) {
-                                primitive.enableLighting = true;
-                            }
-                        }
-                    }
-                    
-                    // Also try to set lighting on the model itself
-                    if (model.lightColor !== undefined) {
-                        model.lightColor = new Cesium.Cartesian3(1.0, 1.0, 1.0);
-                    }
-                    if (model.enableLighting !== undefined) {
-                        model.enableLighting = true;
-                    }
-                    
-                    console.log('[LargeModel] Enhanced lighting enabled for better face differentiation');
-                } catch (e) {
-                    console.warn('[LargeModel] Could not enhance lighting:', e);
-                }
-                
-                try {
-                    if (model.boundingSphere) {
-                        console.log(`[LargeModel] Model bounds:`, model.boundingSphere);
-                        console.log(`[LargeModel] Model radius: ${(model.boundingSphere.radius / 1000).toFixed(2)} km`);
-                    }
-                } catch (e) {
-                    // Bounding sphere might not be available yet
-                }
-                
-                if (loadingIndicator) {
-                    loadingIndicator.textContent = 'Model loaded!';
-                }
-                finish(resolve, entity);
-            }).catch(error => {
-                clearInterval(progressInterval);
-                clearTimeout(failsafe);
-                console.error(`[LargeModel] ✗ Error loading model ${modelUrl}:`, error);
-                console.error(`[LargeModel] Error details:`, {
-                    message: error.message,
-                    stack: error.stack,
-                    modelUrl: modelUrl,
-                    entityId: entity.id
-                });
-                
-                // Check for stack overflow or model complexity errors first
-                const errorMessage = error.message || error.toString();
-                if (errorMessage.includes('Maximum call stack size exceeded') || 
-                    errorMessage.includes('stack size exceeded') ||
-                    errorMessage.includes('Failed to load glTF')) {
-                    console.error('[LargeModel] ⚠ Model is too complex for browser to load.');
-                    console.error('[LargeModel] ⚠ Recommendations:');
-                    console.error('[LargeModel]   1. Split the model into smaller parts');
-                    console.error('[LargeModel]   2. Simplify the model structure in source software');
-                    console.error('[LargeModel]   3. Reduce polygon count and nested nodes');
-                    console.error('[LargeModel]   4. Consider using 3D Tiles format instead');
-                    
-                    if (loadingIndicator) {
-                        loadingIndicator.innerHTML = `
-                            <strong>Model too complex to load</strong><br>
-                            Error: ${errorMessage.substring(0, 100)}...<br>
-                            See console for recommendations.
-                        `;
-                        loadingIndicator.style.color = '#ff6b6b';
-                        loadingIndicator.style.display = 'block';
-                    }
-                } else if (error.message && error.message.includes('404')) {
-                    console.error('[LargeModel] File not found! Check the file path.');
-                    if (loadingIndicator) {
-                        loadingIndicator.textContent = `Error: File not found (404)`;
-                        loadingIndicator.style.color = '#ff6b6b';
-                        loadingIndicator.style.display = 'block';
-                    }
-                } else if (error.message && error.message.includes('CORS')) {
-                    console.error('[LargeModel] CORS error! File may need to be served from same origin.');
-                    if (loadingIndicator) {
-                        loadingIndicator.textContent = `Error: CORS issue`;
-                        loadingIndicator.style.color = '#ff6b6b';
-                        loadingIndicator.style.display = 'block';
-                    }
-                } else if (error.message && error.message.includes('memory')) {
-                    console.error('[LargeModel] Out of memory! Model may be too large for browser.');
-                    if (loadingIndicator) {
-                        loadingIndicator.textContent = `Error: Out of memory`;
-                        loadingIndicator.style.color = '#ff6b6b';
-                        loadingIndicator.style.display = 'block';
-                    }
-                } else {
-                    if (loadingIndicator) {
-                        loadingIndicator.textContent = `Error: ${errorMessage.substring(0, 50)}...`;
-                        loadingIndicator.style.color = '#ff6b6b';
-                        loadingIndicator.style.display = 'block';
-                    }
-                }
-                entities.remove(entity);
-                loadedModels.delete(entity.id);
-                finish(reject, error);
-            });
-        };
-        
-        const pollForReady = (model, entity) => {
-            // Fallback: poll for ready state
-            const progressInterval = setInterval(() => {
-                if (settled) {
-                    clearInterval(progressInterval);
-                    return;
-                }
-                if (loadingIndicator) {
-                    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-                    loadingIndicator.textContent = `Loading ${fileLabel}... ${elapsed}s elapsed`;
-                }
-                
-                // Check for errors
-                if (model.error) {
-                    clearInterval(progressInterval);
-                    clearTimeout(failsafe);
-                    console.error(`[LargeModel] ✗ Model error detected:`, model.error);
-                    if (loadingIndicator) {
-                        loadingIndicator.textContent = `Error: ${model.error}`;
-                        loadingIndicator.style.display = 'block';
-                    }
-                    entities.remove(entity);
-                    loadedModels.delete(entity.id);
-                    finish(reject, new Error(`Model error: ${model.error}`));
-                    return;
-                }
-                
-                if (model.ready) {
-                    clearInterval(progressInterval);
-                    clearTimeout(failsafe);
-                    const loadTime = ((Date.now() - startTime) / 1000).toFixed(2);
-                    console.log(`[LargeModel] ✓ Model loaded (polled): ${modelUrl} (${loadTime}s)`);
-                    forceModelOpacity(entity, model);
-                    finish(resolve, entity);
-                }
-            }, 500);
-            
-            // Timeout after 5 minutes
-            setTimeout(() => {
-                clearInterval(progressInterval);
-                if (!settled && !model.ready) {
-                    clearTimeout(failsafe);
-                    console.error(`[LargeModel] ✗ Model loading timeout after 5 minutes: ${modelUrl}`);
-                    console.error(`[LargeModel] File: ${fileLabel} — check Network tab for the real URL / size.`);
-                    if (loadingIndicator) {
-                        loadingIndicator.textContent = `Loading timeout: ${fileLabel}`;
-                        loadingIndicator.style.display = 'block';
-                    }
-                    entities.remove(entity);
-                    loadedModels.delete(entity.id);
-                    finish(reject, new Error('Model loading timeout after 5 minutes'));
-                }
-            }, 300000); // 5 minutes
-        };
-        
-        // Start checking after a short delay to allow entity to initialize
-        setTimeout(checkModelStatus, 100);
-    });
+    try {
+        forceModelOpacity(entity, entity.model);
+    } catch (_) {
+        /* the graphics object accepts opacity; the underlying model may not exist yet */
+    }
+
+    return Promise.resolve(entity);
 }
+
 
 /**
  * Remove a large model

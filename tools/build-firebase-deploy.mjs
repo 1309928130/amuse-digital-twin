@@ -40,20 +40,34 @@ const COPY_DIRS = ['src', 'framework', 'simulation_data', 'models', 'data', 'cas
 /**
  * Directories excluded from the bundle even though they sit inside a copy root.
  *
- * The GTFS feed directories are multi-gigabyte raw downloads that the static
- * site does not read: the host serves a draft viewer, and the transit features
- * that consume them are dormant there. Shipping them would mean a ~4.6 GB
- * upload for no benefit. They are regenerated locally with
- * `npm run download-static` when the transit layer is actually needed.
+ * The two raw national feeds are multi-gigabyte downloads that the static site
+ * must not carry: `gtfs-nl` is 1.7 GB and `gtfs-extracted` 1.4 GB, which would
+ * mean a ~3 GB upload for data the viewer never preferentially reads. They are
+ * regenerated locally with `npm run download-static`.
+ *
+ * The two *filtered* Zuidoost feeds are deliberately NOT excluded, and the
+ * distinction matters because an earlier version of this list excluded them too
+ * and broke the transit layer in production:
+ *
+ *   * `gtfs-zuidas-2025-12-17` is the set `routeVisualization.js` looks for
+ *     first, and the only one carrying `shapes.txt`. Route geometry is drawn
+ *     from that file, so without it every route silently falls back to straight
+ *     lines between stops -- a degraded view, not a missing one, which is why
+ *     the exclusion went unnoticed.
+ *   * `gtfs-zuidas` is the code's own "recommended" fallback. It lacks
+ *     `shapes.txt` but is the more complete set for schedules.
+ *
+ * Together they are 51 MB, which is affordable for a hosted draft. The rule to
+ * keep: exclude by *size*, not by the assumption that a feature is dormant. The
+ * viewer reads all four of these paths on every load and probes the missing ones
+ * as 404s, so excluding a directory the code fetches is always visible in the
+ * console even when it looks harmless on screen.
  *
  * Paths are relative to the app root.
  */
 const EXCLUDE_DIRS = new Set([
     'data/static-gtfs/gtfs-extracted',
     'data/static-gtfs/gtfs-nl',
-    'data/static-gtfs/gtfs-zuidas',
-    'data/static-gtfs/gtfs-zuidas-2025-12-15',
-    'data/static-gtfs/gtfs-zuidas-2025-12-17',
     'data/static-gtfs/snapshots',
 ]);
 

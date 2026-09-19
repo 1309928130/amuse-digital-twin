@@ -1994,19 +1994,47 @@
             pointer-events: none;
         }
 
-        /* Live numbers, below the navigation bar on the left so they clear both
-           the nav and Cesium's own layer picker. */
+        /* One card, top-left, below the navigation bar and clear of Cesium's own
+           layer picker. Sized to its content: it carries the counts, the
+           sparkline, the formula and the index. */
         .vq-float-stats {
             left: 16px;
             top: 16px;
-            width: 214px;
+            width: 254px;
+            max-height: calc(100vh - var(--nav-height) - 90px);
+            overflow-y: auto;
         }
 
-        /* The index, bottom-right, above the credit strip. */
-        .vq-float-index {
-            right: 16px;
-            bottom: 46px;
-            width: 262px;
+        /* Fold header. The whole card is the fold, so the title is the control. */
+        .vq-fold-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            cursor: pointer;
+            user-select: none;
+            margin-bottom: 0;
+        }
+        .vq-fold-head:hover {
+            opacity: 0.86;
+        }
+        .vq-fold-chevron {
+            font-size: 9px;
+            opacity: 0.7;
+            transition: transform 0.18s ease;
+        }
+        .vq-fold-head[aria-expanded="true"] .vq-fold-chevron {
+            transform: rotate(90deg);
+        }
+        .vq-fold-head[aria-expanded="true"] {
+            margin-bottom: 7px;
+        }
+
+        /* Separates the counts from the index inside the single card. */
+        .vq-card-divider {
+            height: 1px;
+            background: rgba(255, 255, 255, 0.12);
+            margin: 9px 0 8px;
         }
 
         /* Status: model loading or a failure. Centred, and only present then. */
@@ -2133,12 +2161,7 @@
            The box layer needs no adjustment: it is sized from the canvas. */
         @media (max-width: 900px) {
             .vq-float-stats {
-                width: 176px;
-            }
-            .vq-float-index {
-                width: 210px;
-                right: 10px;
-                bottom: 40px;
+                width: 196px;
             }
         }
 

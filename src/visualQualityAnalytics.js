@@ -71,9 +71,22 @@ function build() {
         -->
         <canvas class="vq-box-layer" id="vqBoxLayer"></canvas>
 
-        <!-- Live numbers, below the navigation bar on the left. -->
-        <div class="vq-float vq-float-stats">
-            <div class="vq-float-title">Eye-level visual quality</div>
+        <!--
+            One card, foldable.
+
+            The counts and the index were two cards in opposite corners, which
+            split a single reading across the screen: the index is the summary of
+            the counts, and having to look in two places to connect them was work
+            the reader should not have to do. The header folds the whole thing
+            away, which is what makes it acceptable to keep it on screen while
+            looking at the scene.
+        -->
+        <div class="vq-float vq-float-stats" id="vqA_card">
+            <div class="vq-float-title vq-fold-head" id="vqA_foldHead" role="button" tabindex="0"
+                 aria-expanded="true" aria-controls="vqA_cardBody">
+                <span>Eye-level visual quality</span><span class="vq-fold-chevron">▶</span>
+            </div>
+            <div class="vq-fold-body" id="vqA_cardBody">
             <div class="vq-stat">
                 <span class="vq-stat-label">People detected</span>
                 <span class="vq-stat-value" id="vqA_count">–</span>
@@ -94,10 +107,9 @@ function build() {
                               points=""></polyline>
                 </svg>
             </div>
-        </div>
 
-        <!-- The index and its terms, bottom-right, clear of the credit strip. -->
-        <div class="vq-float vq-float-index">
+            <div class="vq-card-divider"></div>
+
             <div class="vq-float-title vq-small">Visual-quality index</div>
             <div class="vq-formula" id="vqA_formula"></div>
             <div class="vq-index-row">
@@ -119,6 +131,7 @@ function build() {
                 Weights are placeholders. Terms marked <b>default</b> are not measured,
                 so the index is a structure to argue with, not a result.
             </div>
+            </div>
         </div>
 
         <!-- Transient status: model load, or a failure. Empty and hidden at rest. -->
@@ -132,6 +145,37 @@ function build() {
         resizeBound = true;
         window.addEventListener('resize', clearBoxes);
     }
+    wireFold();
+}
+
+/**
+ * Make the card header fold its body.
+ *
+ * The state is kept in memory rather than in sessionStorage, unlike the panel
+ * folds: this is a view of the scene, and a reader who collapsed it on one visit
+ * is not asking for it collapsed on the next. It also returns to expanded on
+ * every page entry, which is the state that shows the measurement.
+ */
+function wireFold() {
+    const head = document.getElementById('vqA_foldHead');
+    const body = document.getElementById('vqA_cardBody');
+    if (!head || !body || head.dataset.vqFoldWired) return;
+    head.dataset.vqFoldWired = '1';
+
+    const setOpen = (open) => {
+        body.style.display = open ? '' : 'none';
+        head.setAttribute('aria-expanded', open ? 'true' : 'false');
+        head.classList.toggle('vq-folded', !open);
+    };
+    const toggle = () => setOpen(head.getAttribute('aria-expanded') !== 'true');
+
+    head.addEventListener('click', toggle);
+    // Keyboard-operable, since the header is a control rather than decoration.
+    head.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
+        e.preventDefault();
+        toggle();
+    });
 }
 
 /** Show the floating overlay. */

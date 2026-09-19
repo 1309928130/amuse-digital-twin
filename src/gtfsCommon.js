@@ -793,7 +793,22 @@ export function updateVehicleEntity(vehicle) {
                 outlineColor: Cesium.Color.WHITE,
                 outlineWidth: 2,
                 heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-                disableDepthTestDistance: Number.POSITIVE_INFINITY
+                // Depth-tested, so a tram behind a block is hidden by it.
+                //
+                // This used to be POSITIVE_INFINITY, which disables depth testing
+                // entirely: every vehicle drew through every building and was
+                // visible from anywhere. The intent was to keep a tram readable
+                // against the ground it sits on, and that is what
+                // `HeightReference.CLAMP_TO_GROUND` already does. The infinity was
+                // doing something else as well, and that other thing was wrong --
+                // on the eye-level pages it scattered route numbers across the
+                // façades like HUD markers, with no way to tell which street they
+                // were on.
+                //
+                // The cost is that a tram in a deep street canyon can be hidden by
+                // the block in front of it. That is the correct behaviour for a
+                // view that is meant to look like a place.
+                disableDepthTestDistance: 0
             },
             label: {
                 text: label,
@@ -804,7 +819,12 @@ export function updateVehicleEntity(vehicle) {
                 style: Cesium.LabelStyle.FILL_AND_OUTLINE,
                 verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
                 pixelOffset: new Cesium.Cartesian2(0, -30),
-                heightReference: Cesium.HeightReference.CLAMP_TO_GROUND
+                heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+                // Stated rather than left to the default, because it is the
+                // sibling of a value that was wrong: the label must be occluded by
+                // the same buildings as the point it annotates, or a route number
+                // floats on a façade with no tram under it.
+                disableDepthTestDistance: 0
             }
         });
         

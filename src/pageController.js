@@ -45,6 +45,17 @@ let activePage = null;
 let designEntities = [];
 
 /**
+ * The subset of `designEntities` that this module loaded itself.
+ *
+ * `ensureDesignModel` also *adopts* a model that `main.js` already put in the
+ * scene, so `designEntities` can hold an entity the page controller does not
+ * own and must not remove -- `main.js` keeps its own reference and the 3D
+ * Models checkbox still controls it. Hiding the massing on a page that does not
+ * want it may only touch what was created here, which is what this tracks.
+ */
+let ownedDesignEntities = [];
+
+/**
  * Cesium heading for a framed rectangle view: look north, slightly rotated so
  * the street grid reads diagonally (matches the existing default view style).
  */
@@ -268,6 +279,7 @@ async function ensureDesignModel() {
             }
         );
         designEntities = [entity];
+        ownedDesignEntities = [entity];
         console.log('[Pages] Design GLB loaded for assessment pages');
     } catch (error) {
         console.warn('[Pages] Design GLB unavailable:', error);
@@ -495,12 +507,25 @@ export async function applyPageLayers(page) {
     // Pages that want the buildings visible without a result layer set this.
     // `ensureDesignModel` is idempotent, so this only loads the GLB the first
     // time and never fights another page for the entity.
+    //
+    // The `else` matters as much as the `if`. Until it was added, a page that
+    // asked for the massing kept it on screen for every page visited
+    // afterwards, because nothing ever removed it -- so the buildings leaked
+    // from the pollution page onto micro-mobility, where the street view was
+    // then occluded by geometry the page had not asked for. Every other layer
+    // here is set to an explicit true *or* false for exactly this reason.
     if (want.designMassing) {
         try {
             await ensureDesignModel();
         } catch (error) {
             console.warn('[Pages] Design massing failed:', error);
         }
+    } else if (ownedDesignEntities.length) {
+        // Only the entities this module loaded. A model adopted from `main.js`
+        // is deliberately left alone: that one is owned by the start-up path and
+        // is still controlled by the 3D Models checkbox, so removing it here
+        // would make the checkbox lie.
+        hideOwnedDesignEntities();
     }
 
     // --- Link tooltip behaviour is page-scoped ---
@@ -1121,4 +1146,28 @@ export function clearPageModels() {
         try { removeLargeModel(entity); } catch (_) { /* ignore */ }
     });
     designEntities = [];
+    ownedDesignEntities = [];
+}
+
+/**
+ * Hide the design massing a page loaded, without touching a model adopted from
+ * `main.js`. Used when moving to a page whose layer set does not ask for the
+ * buildings, so they do not stay on screen over a view that did not request
+ * them -- the street-level micro-mobility page in particular, where an
+ * unexpected massing blocks the trajectory view it exists to show.
+ *
+ * Removing is deliberate rather than `show = false`: the model is small and
+ * reloads in a frame, and a hidden entity would still be picked by
+ * `otherPanelGeometry`, so a later page would adopt a massing that is not
+ * visible and skip loading a real one.
+ */
+function hideOwnedDesignEntities() {
+    ownedDesignEntities.forEach((entity) => {
+        try { removeLargeModel(entity); } catch (_) { /* ignore */ }
+    });
+    const removed = new Set(ownedDesignEntities);
+    designEntities = designEntities.filter((entity) => !removed.has(entity));
+    ownedDesignEntities = [];
+    const zuidasSwitch = document.getElementById('zuidasGlbSwitch');
+    if (zuidasSwitch) zuidasSwitch.checked = false;
 }

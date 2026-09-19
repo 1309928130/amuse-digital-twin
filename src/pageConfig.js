@@ -345,20 +345,22 @@ export const MICRO_STREET_VIEW = {
     // and made the trajectories look mis-georeferenced when they were not.
     // If the Kova run is re-exported, re-derive this from
     // agent_trajectories.json rather than nudging it by hand.
-    longitude: 4.866444,
-    latitude: 52.336889,
-    // Raised from 4.2 to 9.2 m at the reviewer's request, to look slightly down
-    // on the street rather than along it at head height.
-    height: 9.2,
-    headingDeg: 22,
+    //
+    // Re-framed at the reviewer's request by moving the camera in the running
+    // viewer and reading it back, so these are measured values rather than
+    // adjusted ones: down from 9.2 m to 7.18 m, ~3 m south, and turned ~8 deg
+    // left of the previous heading.
+    longitude: 4.8664264,
+    latitude: 52.3368172,
+    height: 7.18,
+    headingDeg: 14.26,
     // A shallow downward tilt. Looking level would put the horizon mid-frame and
     // waste half the viewport on sky.
     //
-    // Steepened from -14 to -19 deg in the same pass, so the extra height is
-    // spent on the ground the trajectories occupy rather than on the horizon.
-    // The two changes belong together: raising the camera without tilting it
-    // down would have shown more sky, not more street.
-    pitchDeg: -19,
+    // Steepened from -19 to -18.21 deg with the re-framing above: the camera
+    // came down and closer, so it needs slightly less tilt to keep the ground
+    // the trajectories occupy in frame without tipping toward plan view.
+    pitchDeg: -18.21,
 };
 
 register({

@@ -231,6 +231,15 @@ export function initializeViewer(containerId = 'cesiumContainer') {
         }
     });
 
+    // Deliberate debug handle, in the same spirit as `window.__dataRegistry`.
+    // The viewer is module-scoped and reached through `getViewer()`, so without
+    // this there is no way to read the live camera from the browser console --
+    // which makes it impossible to capture a camera position someone has just
+    // framed by hand. Harmless to expose: it is a viewer, not credentials.
+    if (typeof window !== 'undefined') {
+        window.__viewer = viewer;
+    }
+
     return viewer;
 }
 

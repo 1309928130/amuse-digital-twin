@@ -183,6 +183,7 @@ async function loadFramedWalk() {
         framedWalk = {
             footpath: path.footpath,
             metres: path.metres || pathLengthMetres(path.footpath),
+            label: path.name || payload.name || 'Example 1',
             startHeadingDeg: path.startHeadingDeg != null
                 ? path.startHeadingDeg
                 : (payload.start && payload.start.headingDeg),
@@ -216,7 +217,7 @@ export async function listWalkRoutes() {
         out.push({
             index: FRAMED_ROUTE_INDEX,
             metres: framed.metres,
-            label: `Framed walk — ${Math.round(framed.metres)} m`,
+            label: framed.label || 'Example 1',
         });
     }
     const agents = await loadTrajectories();

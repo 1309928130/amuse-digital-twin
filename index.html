@@ -3479,6 +3479,40 @@
         </div>
 
         <!--
+            Section: walk-through camera.
+
+            A camera that walks a route at eye height, so the eye-level assessment can
+            be experienced as movement rather than as one frozen frame. The route is a
+            real agent footpath from the Kova export, not a hand-drawn path, so the
+            camera goes where pedestrians actually went.
+        -->
+        <div class="param-section" data-section-id="walkcam">
+            <div class="param-section-title param-accordion" data-fold-key="walkcam" aria-expanded="false">
+                <span>Walk-through camera</span><span class="chevron">▶</span>
+            </div>
+            <div class="param-fold">
+                <button type="button" id="walkToggle" class="param-action-btn flow-hour-btn" style="width:100%;margin:2px 0 6px;">
+                    Play walk-through
+                </button>
+                <label class="param-row" style="flex-direction: column; align-items: stretch; gap: 5px;">
+                    <span style="opacity: 0.7; font-size: 11px;">Route</span>
+                    <select id="walkRouteSelect" class="param-select">
+                        <option value="auto">Longest footpath (default)</option>
+                    </select>
+                </label>
+                <label class="param-row" style="flex-direction: column; align-items: stretch; gap: 5px; margin-top: 6px;">
+                    <span style="opacity: 0.7; font-size: 11px;">Walking speed <span id="walkSpeedValue">1.2 m/s</span></span>
+                    <input type="range" id="walkSpeed" min="0.4" max="2.5" step="0.1" value="1.2">
+                </label>
+                <div class="param-help" style="margin-top: 6px;">
+                    Moves the camera along a real agent route at eye height (1.7 m), looking
+                    ahead the way a walker does. Press again to stop; the view stays where
+                    it stopped.
+                </div>
+            </div>
+        </div>
+
+        <!--
             Section: overlap independence note (multi-layer overlap page).
 
             The one thing a reader can get wrong on this page is assuming the

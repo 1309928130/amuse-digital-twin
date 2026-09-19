@@ -20,6 +20,7 @@ import {
     startVisualQualityAnalytics,
 } from './visualQualityAnalytics.js';
 import { initCameraPresets } from './cameraPresets.js';
+import { initWalkCamera } from './walkCamera.js';
 import { toggleGrasshopperHeat } from './heatmapVisualization.js';
 import { toggleSunlightAnalysis } from './sunlightVisualization.js';
 import {
@@ -1117,6 +1118,14 @@ export async function initializePages(navEl) {
     initializeDocView();
     initializeToolsView();
     initializeOverlapNoteLink();
+    // The preset dropdown and the walk-through controls are populated from data
+    // and preset lists rather than markup, so they have to be wired once here.
+    // `initCameraPresets` was previously imported but never called, which left
+    // the dropdown inert.
+    initCameraPresets();
+    initWalkCamera().catch((err) => {
+        console.warn('[walk] Could not initialise the walk-through camera:', err);
+    });
 
     // Restore the last chosen design proposal before the first page applies its
     // layers, so the initial render already reflects the saved study.

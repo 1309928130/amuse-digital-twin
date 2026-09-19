@@ -300,7 +300,7 @@ register({
     camera: { ...OVERVIEW_VIEWPOINT },
     layers: { networkFlow: true, pedDemand: false, urbanHeat: false, sunlight: false, wind: false },
     linkTooltip: 'hover',
-    sections: ['layers', 'camera', 'flow-scope', 'legend-flow', 'flow-hour', 'legend-demand', 'meta-flow', 'validity'],
+    sections: ['layers', 'camera', 'walkcam', 'flow-scope', 'legend-flow', 'flow-hour', 'legend-demand', 'meta-flow', 'validity'],
     validity: {
         rating: 'medium',
         basis:
@@ -412,7 +412,7 @@ register({
     // at eye level, and the figure is the point of that reading.
     avatarMode: 'figure',
     linkTooltip: 'click',
-    sections: ['layers', 'camera', 'transport', 'legend-sunlight', 'micro-scope', 'legend-trajectories', 'validity'],
+    sections: ['layers', 'camera', 'walkcam', 'transport', 'legend-sunlight', 'micro-scope', 'legend-trajectories', 'validity'],
     validity: {
         rating: 'medium',
         basis:
@@ -442,7 +442,7 @@ register({
     camera: { ...SUNLIGHT_VIEWPOINT },
     layers: { sunlight: true, urbanHeat: false, networkFlow: false, wind: false },
     linkTooltip: 'click',
-    sections: ['layers', 'camera', 'legend-sunlight', 'sunlight-method', 'validity'],
+    sections: ['layers', 'camera', 'walkcam', 'legend-sunlight', 'sunlight-method', 'validity'],
     validity: {
         rating: 'high',
         basis:
@@ -467,7 +467,7 @@ register({
     camera: { ...SITE_BLOCK_VIEWPOINT },
     layers: { sunlight: false, urbanHeat: false, networkFlow: false, wind: true },
     linkTooltip: 'click',
-    sections: ['layers', 'camera', 'legend-wind', 'placeholder-method', 'validity'],
+    sections: ['layers', 'camera', 'walkcam', 'legend-wind', 'placeholder-method', 'validity'],
     validity: {
         rating: 'medium',
         basis:
@@ -491,7 +491,7 @@ register({
     camera: { ...SITE_BLOCK_VIEWPOINT },
     layers: { sunlight: false, urbanHeat: false, networkFlow: false, wind: false },
     linkTooltip: 'click',
-    sections: ['layers', 'camera', 'legend-noise', 'placeholder-method', 'validity'],
+    sections: ['layers', 'camera', 'walkcam', 'legend-noise', 'placeholder-method', 'validity'],
     validity: {
         rating: 'low',
         basis:
@@ -533,7 +533,7 @@ register({
         designMassing: true,
     },
     linkTooltip: 'click',
-    sections: ['layers', 'camera', 'legend-pollution', 'placeholder-method', 'validity'],
+    sections: ['layers', 'camera', 'walkcam', 'legend-pollution', 'placeholder-method', 'validity'],
     validity: {
         rating: 'medium',
         basis:
@@ -558,7 +558,7 @@ register({
     camera: { ...SITE_BLOCK_VIEWPOINT },
     layers: { urbanHeat: true, sunlight: false, networkFlow: false, wind: false },
     linkTooltip: 'click',
-    sections: ['layers', 'camera', 'legend-heat', 'heat-method', 'validity'],
+    sections: ['layers', 'camera', 'walkcam', 'legend-heat', 'heat-method', 'validity'],
     validity: {
         rating: 'medium',
         basis:
@@ -583,7 +583,7 @@ register({
     camera: { ...SITE_BLOCK_VIEWPOINT },
     layers: { sunlight: false, urbanHeat: false, networkFlow: false, wind: false },
     linkTooltip: 'click',
-    sections: ['layers', 'camera', 'legend-visibility', 'placeholder-method', 'validity'],
+    sections: ['layers', 'camera', 'walkcam', 'legend-visibility', 'placeholder-method', 'validity'],
     validity: {
         rating: 'high',
         basis:
@@ -634,7 +634,7 @@ register({
     // streetscape until the model is good enough to ship in its place.
     layers: { sunlight: true, urbanHeat: false, networkFlow: false, wind: false, trajectories: true },
     linkTooltip: 'click',
-    sections: ['layers', 'camera', 'transport', 'legend-visual-quality', 'legend-visual-quality-live', 'legend-visual-quality-index', 'validity'],
+    sections: ['layers', 'camera', 'walkcam', 'transport', 'legend-visual-quality', 'legend-visual-quality-live', 'legend-visual-quality-index', 'validity'],
     validity: {
         rating: 'low',
         basis:
@@ -691,7 +691,7 @@ register({
     // In the synthesis view links are read-only: click to inspect, never hover.
     linkTooltip: 'click',
     sections: [
-        'layers', 'camera',
+        'layers', 'camera', 'walkcam',
         'transport',
         'overlap-note',
         'legend-flow',

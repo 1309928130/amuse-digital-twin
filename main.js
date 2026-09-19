@@ -8,6 +8,7 @@ import { configureShadows } from './src/shadowConfig.js';
 import { loadOSMBuildings, clearOSMBuildings } from './src/osmLoader.js';
 import { load3DBagTiles, remove3DBagTiles } from './src/threeDBagLoader.js';
 import { startGTFSUpdates } from './src/gtfsRealtime.js';
+import { setTransitVehiclesVisible } from './src/gtfsCommon.js';
 import { initializeTimeController, setDisplayMode, setSelectedDate } from './src/timeController.js';
 import { toggleGrasshopperHeat } from './src/heatmapVisualization.js';
 import { toggleSunlightAnalysis } from './src/sunlightVisualization.js';
@@ -868,6 +869,7 @@ const UI_CHECKBOX_IDS = [
     'windSwitch',
     'pollutionSwitch',
     'routesSwitch',
+    'gtfsVehiclesSwitch',
     'osmOnlineSwitch',
     'osmLocalSwitch',
     'threedbagSwitch',
@@ -1050,6 +1052,14 @@ async function restoreUiToggles() {
         toggleRouteVisualization(true);
     }
 
+    if (state.gtfsVehiclesSwitch === false) {
+        const gtfsVehiclesSwitch = document.getElementById('gtfsVehiclesSwitch');
+        if (gtfsVehiclesSwitch) {
+            gtfsVehiclesSwitch.checked = false;
+            setTransitVehiclesVisible(false);
+        }
+    }
+
     saveUiToggles();
 }
 
@@ -1064,6 +1074,7 @@ function setupVisualizationControls() {
     const trajectoriesSwitch = document.getElementById('trajectoriesSwitch');
     const windSwitch = document.getElementById('windSwitch');
     const routesSwitch = document.getElementById('routesSwitch');
+    const gtfsVehiclesSwitch = document.getElementById('gtfsVehiclesSwitch');
 
     // Urban Heat (Grasshopper / Ladybug CSV)
     if (urbanHeatSwitch) {
@@ -1405,6 +1416,16 @@ function setupVisualizationControls() {
         console.log('Routes visualization toggle initialized');
     } else {
         console.warn('Routes switch element not found');
+    }
+
+    // GTFS vehicle dots (trams/buses). Separate from route lines: the eye-level
+    // pages want the vehicles off by default while route lines can stay available.
+    if (gtfsVehiclesSwitch) {
+        setTransitVehiclesVisible(gtfsVehiclesSwitch.checked);
+        gtfsVehiclesSwitch.addEventListener('change', (e) => {
+            setTransitVehiclesVisible(e.target.checked);
+            saveUiToggles();
+        });
     }
 }
 

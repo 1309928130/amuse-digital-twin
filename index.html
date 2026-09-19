@@ -1957,11 +1957,16 @@
         */
         #vqAnalytics {
             position: absolute;
-            /* Right edge stops where the panel begins. The layer used to run the
-               full width, which put the index card underneath the panel: the
-               panel is z-index 1000 and this layer is 850, so the card was
-               painted, correct, and completely hidden. */
-            inset: var(--nav-height) var(--right-panel-width) 0 0;
+            /* Must align exactly with the Cesium canvas, because detection boxes
+               are drawn into this layer in scene-canvas pixels. `inset` started
+               at `--nav-height` (46px), which shifted the whole layer down by the
+               nav bar height: every box then landed 46px below its figure, with
+               the bottom still near the feet so it read as "boxes sit a bit low".
+               Top is 0 to match the canvas; the right edge still stops where the
+               panel begins, because the panel is z-index 1000 against this
+               layer's 850 and would otherwise paint over the index card. Cards
+               keep clear of the nav bar through their own top offset. */
+            inset: 0 var(--right-panel-width) 0 0;
             z-index: 850;
             pointer-events: none;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -1996,10 +2001,12 @@
 
         /* One card, top-left, below the navigation bar and clear of Cesium's own
            layer picker. Sized to its content: it carries the counts, the
-           sparkline, the formula and the index. */
+           sparkline, the formula and the index. The card is offset below the bar
+           itself, rather than the whole layer being offset, so the box canvas
+           stays aligned with the scene it annotates. */
         .vq-float-stats {
             left: 16px;
-            top: 16px;
+            top: calc(var(--nav-height) + 16px);
             width: 254px;
             max-height: calc(100vh - var(--nav-height) - 90px);
             overflow-y: auto;

@@ -363,12 +363,17 @@ function drawBoxes(result) {
         ctx.lineWidth = 2;
         ctx.strokeRect(bx, by, bw, bh);
 
+        // The score is drawn just *above* the box, not inside it. Inside, it sat
+        // on the figure's head and made the box look like it started lower than
+        // it does. Clamped to the viewport so a box at the top edge keeps its
+        // label visible instead of having it clipped away.
         const label = det.score.toFixed(2);
         const tw = ctx.measureText(label).width;
+        const labelY = Math.max(0, by - 18);
         ctx.fillStyle = 'rgba(0,0,0,0.62)';
-        ctx.fillRect(bx, by, tw + 10, 17);
+        ctx.fillRect(bx, labelY, tw + 10, 17);
         ctx.fillStyle = '#FFD54F';
-        ctx.fillText(label, bx + 5, by + 9);
+        ctx.fillText(label, bx + 5, labelY + 9);
     }
 }
 

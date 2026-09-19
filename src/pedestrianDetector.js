@@ -56,8 +56,17 @@ const Cesium = globalThis.Cesium;
 const ORT_URL = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.18.0/dist/ort.min.js';
 const MODEL_URL = 'models/yolov5n-pedestrian.onnx';
 
-/** Detection confidence below which a box is discarded. */
-const CONFIDENCE_THRESHOLD = 0.35;
+/**
+ * Detection confidence below which a box is discarded.
+ *
+ * Objectness and class score are multiplied, so this is a joint threshold and
+ * ends up stricter than either factor alone. It was 0.35 while the frame was
+ * being aspect-squashed, which suppressed nearly everything; with the geometry
+ * fixed, 0.25 recovers small and partly occluded figures without the false
+ * positives that a low threshold causes on a textured street scene. The person
+ * class is the only one kept, so a marginal box is still a person.
+ */
+const CONFIDENCE_THRESHOLD = 0.25;
 
 /**
  * IoU above which two boxes are treated as the same person.
@@ -148,8 +157,23 @@ export function isModelReady() {
  * encode and decode a PNG for every frame -- far too slow at several frames per
  * second. `drawImage` onto a 2D canvas is the cheap path.
  *
+ * ## Letterboxing, and why the aspect ratio must be preserved
+ *
+ * This used to stretch the frame to a square. That was a regression: at
+ * 1307x779 the width was compressed 2.04x while the height was compressed only
+ * 1.22x, so every figure was sheared by roughly 1.7:1 -- a standing person
+ * (about 1:3 wide-to-tall) came out nearer 1:1.8. Recall collapsed, because the
+ * person class leans hard on that aspect prior, and it made the detector look
+ * broken on figures that were plainly large enough to detect.
+ *
+ * The frame is now scaled by a single factor and centred on a grey canvas, so
+ * nothing is distorted. The bars cost some input resolution, which is the trade
+ * this detector wants: a smaller undistorted person is far more recognisable
+ * than a large squashed one.
+ *
  * @param {number} size Square side to resample to, in pixels.
- * @returns {{data: Uint8ClampedArray, width: number, height: number}|null}
+ * @returns {{data: Uint8ClampedArray, box: Object}|null} Frame plus the transform
+ *   needed to map boxes back to canvas pixels.
  */
 function grabFrame(size) {
     const viewer = getViewer();
@@ -163,13 +187,24 @@ function grabFrame(size) {
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) return null;
 
-    // The scene canvas is not square and the model wants square input, so the
-    // frame is stretched rather than letterboxed. Letterboxing would add padding
-    // bars the model was not trained on and shrink the figures further; the
-    // aspect distortion is the smaller error for a detector used on people at a
-    // distance, and the boxes are mapped back through the same transform.
-    ctx.drawImage(source, 0, 0, source.width, source.height, 0, 0, size, size);
-    return ctx.getImageData(0, 0, size, size);
+    // YOLO was trained on mid-grey padding; a black or transparent bar is out of
+    // distribution and can itself attract spurious boxes.
+    ctx.fillStyle = '#7f7f7f';
+    ctx.fillRect(0, 0, size, size);
+
+    const scale = Math.min(size / source.width, size / source.height);
+    const drawW = source.width * scale;
+    const drawH = source.height * scale;
+    const padX = (size - drawW) / 2;
+    const padY = (size - drawH) / 2;
+    ctx.drawImage(source, 0, 0, source.width, source.height, padX, padY, drawW, drawH);
+
+    // Recorded so `detectInView` can invert it. Without this the boxes would be
+    // drawn at padded-model coordinates and sit off the figures.
+    const transform = { scale, padX, padY, size, srcW: source.width, srcH: source.height };
+    const image = ctx.getImageData(0, 0, size, size);
+    image.box = transform;
+    return image;
 }
 
 /**
@@ -343,13 +378,16 @@ function decodeOutput(data, inputSize) {
 /**
  * Run detection on the current rendered frame.
  *
- * @returns {Promise<Object|null>} `{ count, detections, ms, fps, inputSize, frame }`,
- *   or null if the frame could not be read.
+ * @returns {Promise<Object|null>} `{ count, detections, ms, fps, inputSize, frame, box }`,
+ *   or null if the frame could not be read. Detections are in **canvas pixels**,
+ *   with the letterbox already inverted, so a caller can scale by
+ *   `clientWidth / canvas.width` and draw directly.
  */
 export async function detectInView() {
     const sess = await loadModel();
     const frame = grabFrame(INPUT_SIZE);
     if (!frame) return null;
+    const transform = frame.box;
 
     const ort = globalThis.ort;
     // float16 to match the FP16-quantised export; see `toTensor`.
@@ -372,7 +410,13 @@ export async function detectInView() {
             'The model may not be a 640 px YOLOv5 export.'
         );
     }
-    const detections = decodeOutput(raw, INPUT_SIZE);
+    // Model-space boxes, then mapped back through the letterbox so callers get
+    // canvas pixels. Clamped to the source rect because a box can extend into
+    // the padding if the model over-fires at an edge.
+    const detections = decodeOutput(raw, INPUT_SIZE).map((det) => ({
+        ...det,
+        box: modelBoxToCanvas(det.box, transform),
+    }));
 
     frameTimes.push(ms);
     if (frameTimes.length > MAX_FRAME_SAMPLES) frameTimes.shift();
@@ -385,7 +429,28 @@ export async function detectInView() {
         fps: mean > 0 ? 1000 / mean : 0,
         inputSize: INPUT_SIZE,
         frame,
+        box: transform,
     };
+}
+
+/**
+ * Invert the letterbox: model input pixels back to scene-canvas pixels.
+ *
+ * @param {number[]} box `[x1, y1, x2, y2]` in model input pixels.
+ * @param {Object} t Transform from `grabFrame`.
+ * @returns {number[]} Box in canvas pixels.
+ */
+function modelBoxToCanvas(box, t) {
+    const x1 = (box[0] - t.padX) / t.scale;
+    const y1 = (box[1] - t.padY) / t.scale;
+    const x2 = (box[2] - t.padX) / t.scale;
+    const y2 = (box[3] - t.padY) / t.scale;
+    return [
+        Math.max(0, Math.min(t.srcW, x1)),
+        Math.max(0, Math.min(t.srcH, y1)),
+        Math.max(0, Math.min(t.srcW, x2)),
+        Math.max(0, Math.min(t.srcH, y2)),
+    ];
 }
 
 /**

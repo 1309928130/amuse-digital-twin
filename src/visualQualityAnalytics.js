@@ -37,9 +37,6 @@ import {
  */
 const ANALYTICS_INTERVAL_MS = 1000;
 
-/** Side of the analysis frame, matching the detector's model input. */
-const FRAME_SIZE = 640;
-
 let rootEl = null;
 let boxLayer = null;
 let running = false;
@@ -309,14 +306,13 @@ function setStatus(el, text) {
 /**
  * Draw the detection boxes straight onto the scene.
  *
- * The frame the detector saw is stretched to a square `FRAME_SIZE` input, so
- * mapping a box back to the live view is a proportional scale in each axis: the
- * same transform `grabFrame` applied, run backwards. That is why the frame is not
- * shown -- the boxes are placed on the live render, and a faded copy of the
- * render underneath them would be a second, second-stale instance of the same
- * picture.
+ * The detector inverts its own letterbox before returning, so boxes arrive in
+ * scene-canvas pixels and only need backing-store-to-CSS scaling. That is why the
+ * frame is not shown -- the boxes are placed on the live render, and a faded copy
+ * of the render underneath them would be a second, second-stale instance of the
+ * same picture.
  *
- * @param {Object} result Detection result, in `FRAME_SIZE` frame coordinates.
+ * @param {Object} result Detection result, in scene-canvas pixel coordinates.
  */
 function drawBoxes(result) {
     const viewer = getViewer();
@@ -340,8 +336,13 @@ function drawBoxes(result) {
     ctx.clearRect(0, 0, w, h);
     if (!result.detections.length) return;
 
-    const sx = w / FRAME_SIZE;
-    const sy = h / FRAME_SIZE;
+    // Boxes arrive in *canvas backing-store pixels* (the detector inverts its own
+    // letterbox), so the only correction left is backing store to CSS pixels.
+    // This used to divide by FRAME_SIZE, which was correct while the frame was
+    // stretched to a square; with letterboxing in place that would place every
+    // box in the wrong spot.
+    const sx = source.clientWidth / source.width;
+    const sy = source.clientHeight / source.height;
 
     ctx.lineWidth = 2;
     ctx.font = '600 13px sans-serif';

@@ -36,6 +36,7 @@ import { THREEDBAG_CONFIG } from './src/threeDBagLoader.js';
 import { WIND_CONFIG, ZUIDAS_CENTER, LARGE_MODEL_CONFIG, SKETCHUP_CONFIG } from './src/config.js';
 import { loadBoundaryFromGeoJSON, loadBoundaryFromKML } from './src/boundaryLoader.js';
 import { initializePages, getActivePage } from './src/pageController.js';
+import { initCameraPresets } from './src/cameraPresets.js';
 
 // Show loading indicator
 const loadingIndicator = document.getElementById('loadingIndicator');
@@ -111,6 +112,10 @@ async function initialize() {
         // 10. Set up assessment pages (left nav, camera presets, page-scoped layers)
         console.log('Step 10: Initializing assessment pages...');
         await initializePages(document.getElementById('navButtons'));
+        // Wired here rather than inside the page controller because the camera
+        // picker is global furniture: it is offered on every page and does not
+        // belong to any one of them.
+        initCameraPresets();
         
         console.log('Zuidas 3D Visualization initialized successfully!');
         

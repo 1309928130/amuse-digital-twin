@@ -9,6 +9,11 @@ import { resolveExistingPath, onDataRegistryChange } from './dataRegistry.js';
 import { preloadSunlightMesh } from './sunlightPreload.js';
 import { loadLargeModel, removeLargeModel } from './largeModelLoader.js';
 import { resetHourControls, disposeHourControls } from './flowHourControls.js';
+import {
+    initVisualQualityIndex,
+    disposeVisualQualityIndex,
+} from './visualQualityIndex.js';
+import { initCameraPresets } from './cameraPresets.js';
 import { toggleGrasshopperHeat } from './heatmapVisualization.js';
 import { toggleSunlightAnalysis } from './sunlightVisualization.js';
 import {
@@ -434,6 +439,15 @@ export async function applyPageLayers(page) {
     } catch (error) {
         console.warn('[Pages] Network flow failed:', error);
         if (flowSwitch) flowSwitch.checked = false;
+    }
+
+    // --- Visual-quality index (live pedestrian detection) ---
+    // Only the Visual quality page has these controls. Detection competes with
+    // the renderer, so it is started by the reader and always stopped on leaving.
+    if (page.id === 'visual-quality') {
+        initVisualQualityIndex();
+    } else {
+        disposeVisualQualityIndex();
     }
 
     // --- Pedestrian demand (trip generation raster) ---

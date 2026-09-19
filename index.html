@@ -3277,6 +3277,75 @@
             </div>
         </div>
 
+        <!-- Section: visual-quality pedestrian detection -->
+        <!--
+          The live pedestrian counter, plus the formula it feeds. The count comes
+          from running detection on the rendered frame, so it reports what is
+          actually legible in this view rather than what the simulation contains;
+          both numbers are shown, because the difference between them is the
+          point of the exercise.
+        -->
+        <div class="param-section" data-section-id="legend-visual-quality-live">
+            <div class="param-section-title">Pedestrians in view (live)</div>
+
+            <div style="display:flex;gap:6px;margin:6px 0;">
+                <button type="button" id="vqDetectToggle" class="param-action-btn flow-hour-btn">Start counting</button>
+                <button type="button" id="vqDetectEye" class="param-action-btn flow-hour-btn">Eye level</button>
+            </div>
+
+            <!--
+              Detection is far heavier than the scene, so it runs on demand
+              rather than on load: a visitor who is not looking at this metric
+              should not pay for it in frame rate.
+            -->
+            <div id="vqDetectStatus" class="param-help" style="margin-top:6px;">
+                Not running. Detects pedestrians in the current view using an
+                on-device model.
+            </div>
+
+            <div id="vqDetectReadout" style="display:none;margin-top:8px;">
+                <div style="display:flex;justify-content:space-between;font-size:11.5px;padding:2px 0;">
+                    <span style="opacity:0.75;">Detected in view</span><b id="vqDetectedCount">–</b>
+                </div>
+                <div style="display:flex;justify-content:space-between;font-size:11.5px;padding:2px 0;">
+                    <span style="opacity:0.75;">Agents rendered</span><span id="vqRenderedCount">–</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;font-size:11.5px;padding:2px 0;">
+                    <span style="opacity:0.75;">Inference</span><span id="vqInferenceMs">–</span>
+                </div>
+                <canvas id="vqDetectPreview" width="160" height="90"
+                        style="width:100%;margin-top:6px;border-radius:4px;display:none;"></canvas>
+            </div>
+        </div>
+
+        <!-- Section: visual-quality index -->
+        <!--
+          A placeholder index with named terms and adjustable weights. It is
+          labelled as a placeholder in the panel itself, because presenting
+          invented weights as a calibrated score would be the most misleading
+          thing this page could do.
+        -->
+        <div class="param-section" data-section-id="legend-visual-quality-index">
+            <div class="param-section-title">Visual-quality index</div>
+
+            <div id="vqFormula" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+                 font-size:11px;line-height:1.9;margin:6px 0;padding:8px;
+                 background:rgba(255,255,255,0.05);border-radius:4px;white-space:nowrap;
+                 overflow-x:auto;"></div>
+
+            <div class="param-help" style="margin-bottom:8px;">
+                Placeholder weights. Move a slider to see how the index responds; the
+                pedestrian term uses the live count above.
+            </div>
+
+            <div id="vqWeightControls"></div>
+
+            <div style="display:flex;justify-content:space-between;margin-top:8px;
+                        padding-top:6px;border-top:1px solid rgba(255,255,255,0.14);font-size:12px;">
+                <span style="opacity:0.8;">Index</span><b id="vqIndexValue">–</b>
+            </div>
+        </div>
+
         <!-- Section: demand legend -->
         <div class="param-section" data-section-id="legend-demand">
             <div class="param-section-title">Pedestrian demand</div>
@@ -3596,6 +3665,37 @@
         <div id="globalLegendsBlock">
             <div class="param-group-divider" id="globalLegendsDivider"></div>
             <div class="param-section-title" style="margin-bottom: 8px;">Global</div>
+
+        <!-- Camera position -->
+        <!--
+          Named framings of the same scene, so a reader can move between the scale
+          levels the assessment is read at without hunting for the right zoom.
+          The four views are not arbitrary: each one is the framing its own
+          assessment page uses, so selecting it here reproduces that page's eye.
+          Reuses the page presets rather than restating coordinates, so a preset
+          that is re-derived (as the street view was, from the Kova run) stays
+          correct here too.
+        -->
+        <div class="param-section" data-global="camera">
+            <div class="param-section-title param-accordion" data-fold-key="camera" aria-expanded="false">
+                <span>Camera position</span><span class="chevron">▶</span>
+            </div>
+            <div class="param-fold">
+                <label class="param-row" style="flex-direction: column; align-items: stretch; gap: 5px;">
+                    <select id="cameraPresetSelect" class="param-select">
+                        <option value="overview">Area level (whole Zuidas)</option>
+                        <option value="block">Block level (single site)</option>
+                        <option value="street-bird">Street bird view</option>
+                        <option value="eye-level">Eye level (1.7 m)</option>
+                        <option value="home">Home / default view</option>
+                    </select>
+                </label>
+                <div class="param-help" id="cameraPresetHelp" style="margin-top: 6px;">
+                    Area level is the pedestrian-flow framing, block level the quality-page
+                    framing, street bird the micro-mobility framing.
+                </div>
+            </div>
+        </div>
 
         <!-- Display modes + transit routes (always relevant) -->
         <div class="param-section" data-global="display">

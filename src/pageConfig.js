@@ -249,7 +249,7 @@ const STREET_PLAN_VIEWPOINT = {
  *
  * Used for the flow assessment, which covers the largest area.
  */
-const OVERVIEW_VIEWPOINT = {
+export const OVERVIEW_VIEWPOINT = {
     longitude: 4.8877819,
     latitude: 52.3232905,
     height: 2500,
@@ -273,7 +273,7 @@ const OVERVIEW_VIEWPOINT = {
  * so switching between them does not move the camera and the eye can compare
  * one result against another.
  */
-const SITE_BLOCK_VIEWPOINT = {
+export const SITE_BLOCK_VIEWPOINT = {
     longitude: 4.867429,
     latitude: 52.3351892,
     height: 547,
@@ -361,6 +361,33 @@ export const MICRO_STREET_VIEW = {
     // came down and closer, so it needs slightly less tilt to keep the ground
     // the trajectories occupy in frame without tipping toward plan view.
     pitchDeg: -18.21,
+};
+
+/**
+ * Human eye level, standing on the simulated street.
+ *
+ * The point of this preset is that the camera height is the only thing that
+ * makes it "eye level": it is the street view's position dropped to 1.7 m, the
+ * height the visual-quality indicators are defined at. Reusing the street
+ * view's longitude and latitude matters, because that position was derived from
+ * the Kova run as the densest 20 m cell of pedestrian traffic -- so the eye
+ * stands where people actually walk rather than on empty pavement.
+ *
+ * The tilt is raised from the street view's -18 degrees toward level, since a
+ * standing eye looks at façades and sky rather than down at the pavement, and
+ * the visual-quality question is about what fills the view.
+ */
+export const EYE_LEVEL_VIEW = {
+    longitude: MICRO_STREET_VIEW.longitude,
+    latitude: MICRO_STREET_VIEW.latitude,
+    // 1.7 m: the anthropometric eye height used in the visibility literature
+    // (and the value the indicator definitions assume), not an arbitrary low
+    // camera. A drone at 1.7 m would give the same picture; this is a person.
+    height: 1.7,
+    headingDeg: MICRO_STREET_VIEW.headingDeg,
+    // Slightly above level: enough to hold the far kerb and the building bases
+    // in frame without the skyline crowding out the street.
+    pitchDeg: -2.0,
 };
 
 register({
@@ -585,24 +612,31 @@ register({
     // site-block view the other quality pages share: this assessment is read at
     // eye level, where the visual-quality indicators are defined, and the wider
     // site framing puts the camera too far away to judge them.
-    camera: { ...STREET_PLAN_VIEWPOINT },
-    layers: { sunlight: false, urbanHeat: false, networkFlow: false, wind: false },
+    // Eye level, not the street bird view. This assessment is about what a
+    // pedestrian can see, and the indicators it reports are defined at standing
+    // eye height; a camera above the street shows the layout rather than the
+    // view. The `eye-level` global preset moves here too, so the two agree.
+    camera: { ...EYE_LEVEL_VIEW },
+    layers: { sunlight: false, urbanHeat: false, networkFlow: false, wind: false, trajectories: true },
     linkTooltip: 'click',
-    sections: ['layers', 'legend-visual-quality', 'placeholder-method', 'validity'],
+    sections: ['layers', 'legend-visual-quality', 'legend-visual-quality-live', 'legend-visual-quality-index', 'validity'],
     validity: {
         rating: 'low',
         basis:
-            'Street-level visual-quality assessment is not exported to the web viewer yet. ' +
-            'The intended indicators (façade articulation, sky view factor, greenness along ' +
-            'the walking line) are descriptive measures of the design, and their link to ' +
-            'experienced quality is correlational rather than a calibrated prediction.',
+            'The pedestrian count is measured from the rendered frame by an on-device ' +
+            'detector, so it reports what is legible in this view rather than what the ' +
+            'simulation contains — both numbers are shown, and the gap between them is ' +
+            'itself informative. The index weights are placeholders, not calibrated ' +
+            'values, and the greenery, sky, façade and enclosure terms are not measured ' +
+            'yet, so the index is a structure to argue with rather than a result. The ' +
+            'underlying indicators are descriptive measures of the design, and their link ' +
+            'to experienced quality is correlational rather than a calibrated prediction.',
         refs: [
             'Ewing & Handy (2009) Measuring the unmeasurable: urban design qualities related to walkability, *Journal of Urban Design* 14(1).',
             'Yang et al. (2009) Can you see green? Assessing the visibility of urban forests in cities, *Landscape and Urban Planning* 91(2).',
+            'Benedikt (1979) To take hold of space: isovists and isovist fields, *Environment and Planning B* 6(1).',
         ],
     },
-    placeholder:
-        'Street-level visual-quality assessment (Rhino + Python view analysis) is not exported to the web viewer yet.',
 });
 
 register({

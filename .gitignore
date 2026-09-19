@@ -18,6 +18,11 @@ firebase-deploy/
 data/static-gtfs/
 data_cache/
 
+# YOLO detection model for the visual-quality counter — 4 MB of weights,
+# reproducible with `node tools/fetch-yolo-model.mjs`, so it is fetched rather
+# than committed, for the same reason as the data above.
+models/*.onnx
+
 # Local UI-tuning screenshots
 _*.png
 

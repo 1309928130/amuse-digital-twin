@@ -51,6 +51,22 @@ export function initializeViewer(containerId = 'cesiumContainer') {
         // Improve rendering quality
         requestRenderMode: false, // Always render (better quality, slightly less performant)
         maximumRenderTimeChange: Infinity, // Don't limit render time
+        // Required for the visual-quality pedestrian counter, which reads the
+        // rendered frame back out of the canvas to run detection on it. Without
+        // this the drawing buffer is cleared after each composite and any
+        // `toDataURL` or `drawImage` call returns a blank image -- the WebGL spec
+        // permits it, and browsers take that option for speed.
+        //
+        // The cost is real: this disables a driver optimisation, so the scene may
+        // render slightly slower. It is enabled unconditionally rather than only
+        // on the page that needs it because a Cesium viewer's context options are
+        // fixed at construction and cannot be changed later. Should the counter
+        // be dropped, removing this line is the whole revert.
+        contextOptions: {
+            webgl: {
+                preserveDrawingBuffer: true,
+            },
+        },
         timeline: true,
         animation: true,
         vrButton: false,

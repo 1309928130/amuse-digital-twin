@@ -186,7 +186,6 @@ export async function loadSunlightAnalysis(options = {}) {
             maximumScale: 1e9,
             enableShadows: false,
             allowPicking: true,
-            showLoadingIndicator: true,
             heightReference: Cesium.HeightReference.NONE,
             orientation,
             // Keep material as exported (do not force white)
@@ -195,8 +194,9 @@ export async function loadSunlightAnalysis(options = {}) {
             // No loading banner. The mesh is pre-warmed by
             // `preloadSunlightMesh` and Cesium composites it as soon as it can,
             // so a "Loading ..." notice would appear and vanish within a frame
-            // or two -- which reads as a glitch rather than as progress. The
-            // other callers still show one, where the wait is real.
+            // or two -- which reads as a glitch rather than as progress. No
+            // caller shows the banner any more; see `main.js` and
+            // `pageController.js` for the same reasoning.
             showLoadingIndicator: false,
             // Retained for compatibility with the loader's signature. Nothing
             // blocks on it any more; see the note in `loadLargeModel`.

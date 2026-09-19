@@ -260,7 +260,11 @@ async function ensureDesignModel() {
                 orientation: LARGE_MODEL_CONFIG.orientation,
                 color: null,
                 opacity: 1,
-                showLoadingIndicator: true,
+                // No loading notice: this model is the small local Rhino export
+                // (~0.3 MB), so the notice only flashes on the first page that
+                // needs it. The map area already shows the viewer's own startup
+                // indicator for work that is genuinely slow.
+                showLoadingIndicator: false,
             }
         );
         designEntities = [entity];

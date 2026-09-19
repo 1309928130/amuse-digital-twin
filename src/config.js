@@ -227,7 +227,10 @@ export const LARGE_MODEL_CONFIG = {
     minimumPixelSize: 0,
     maximumScale: 1e9,
     enableShadows: false,
-    showLoadingIndicator: true,
+    // Unused: every caller passes its own value, and all of them opt out so the
+    // notice cannot flash on a 0.3 MB local model. Left here only because the
+    // loader reads the same key from its options object.
+    showLoadingIndicator: false,
     allowPicking: false,
     heightReference: 'NONE',
     // Cesium heading: +90° = 90° clockwise from above (fixes a 90° CCW Rhino/glTF mismatch)

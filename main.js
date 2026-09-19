@@ -694,10 +694,9 @@ async function loadZuidasDatamodel() {
         }
 
         console.log(`Loading Zuidas datamodel from: ${modelPath}`);
-        if (loadingIndicator) {
-            loadingIndicator.textContent = `Loading model (${modelPath.split('/').pop()})...`;
-            loadingIndicator.style.display = 'block';
-        }
+        // No loading notice here either: `loadLargeModel` is told not to show one,
+        // and setting the text directly beforehand would defeat that and bring the
+        // notice back on every page load.
 
         const model = await loadLargeModel(
             modelPath,
@@ -705,13 +704,15 @@ async function loadZuidasDatamodel() {
             {
                 ...commonOptions,
                 name: 'Zuidas Datamodel',
-                showLoadingIndicator: true,
+                // No loading indicator: this is the startup load and the file is
+                // served locally, so the notice only flashes on every page load.
+                // The other model loads in this file already opt out the same way.
+                showLoadingIndicator: false,
                 readyTimeoutMs: 8000, // small Rhino export — don't spin forever
             }
         );
 
         console.log('✓ Zuidas datamodel loaded successfully at', position);
-        if (loadingIndicator) loadingIndicator.style.display = 'none';
         try { getViewer().flyTo(model); } catch (error) {
             console.warn('Could not fly to model:', error);
         }

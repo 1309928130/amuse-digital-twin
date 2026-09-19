@@ -92,7 +92,11 @@ export async function loadLargeModel(modelUrl, position, options = {}) {
     // minimumPixelSize: 0 means true geographic size (must not use `||`, since 0 is valid)
     const minimumPixelSize = options.minimumPixelSize !== undefined ? options.minimumPixelSize : 256;
     const maximumScale = options.maximumScale !== undefined ? options.maximumScale : 20000;
-    const showLoadingIndicator = options.showLoadingIndicator !== false;
+    // Off unless a caller explicitly asks for it. Defaulting to on meant any new
+    // call site that simply forgot the option brought back a "Loading <file>..."
+    // box for a model that loads in under a frame, which is how the notice kept
+    // reappearing on page load. Showing progress should be the deliberate choice.
+    const showLoadingIndicator = options.showLoadingIndicator === true;
     
     console.log(`[LargeModel] Loading model: ${modelUrl}`);
     console.log(`[LargeModel] Position: ${position.longitude}, ${position.latitude}, height: ${position.height || 0}`);

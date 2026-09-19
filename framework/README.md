@@ -260,7 +260,7 @@ PedMac link flows and trip-generation demand can also be inspected in the [feder
         <em>&bull; Origin–destination (OD) matrix<sup>1</sup></em><br>
         <em>&bull; 3D road data<sup>2</sup></em>
       </td>
-      <td style="border: 0px solid #cbd5e1; padding: 4px 10px;"><em>Kova PedSim</em></td>
+      <td style="border: 0px solid #cbd5e1; padding: 4px 10px;"><em>SUMO</em>, <em>MassMotion</em> or <em>Kova PedSim</em></td>
       <td style="border: 0px solid #cbd5e1; padding: 4px 10px;"><em>Travel time</em> and detailed pedestrian <em>flows / trajectories</em></td>
     </tr>
   </tbody>
